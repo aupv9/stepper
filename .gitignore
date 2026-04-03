@@ -1,0 +1,59 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+iam-service
+iam-cli
+iam-service.exe
+iam-cli.exe
+
+# Build output
+/bin/
+/dist/
+/out/
+
+# Go test & coverage
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# Go workspace (if using go work)
+go.work
+go.work.sum
+
+# Environment / secrets — NEVER commit these
+.env
+.env.*
+*.secret
+secrets.yaml
+secrets.json
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# OS
+desktop.ini
+
+# Log files
+*.log
+/logs/
+
+# Temp files from tests
+/tmp/
+/testdata/tmp/
+
+# Docker build cache
+.docker/
+
+# Local override configs (mount these at runtime)
+config/policy.local.yaml
+config/policy.override.yaml

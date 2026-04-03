@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.rfc-editor.org)",
+      "Bash(go mod init github.com/common-iam/iam)",
+      "Bash(go get github.com/gin-gonic/gin@latest github.com/labstack/echo/v4@latest github.com/redis/go-redis/v9@latest github.com/golang-jwt/jwt/v5@latest github.com/prometheus/client_golang@latest go.opentelemetry.io/otel@latest go.opentelemetry.io/otel/trace@latest gopkg.in/yaml.v3@latest github.com/spf13/cobra@latest)",
+      "Bash(go build ./...)",
+      "Bash(go get github.com/prometheus/client_golang/prometheus@v1.23.2)",
+      "Bash(go mod tidy)",
+      "Bash(go run cmd/iam-cli/main.go test-policy --config config/policy.example.yaml --method POST --path /api/payments/transfer --acr \"urn:mace:incommon:iap:silver\" --scopes \"openid payments:write payments:transfer\")",
+      "Bash(go run cmd/iam-cli/main.go test-policy --config config/policy.example.yaml --method POST --path /api/payments/transfer --acr \"urn:mace:incommon:iap:bronze\" --scopes \"openid payments:write\")",
+      "Bash(go run cmd/iam-cli/main.go test-policy --config config/policy.example.yaml --method POST --path /api/admin/users --acr \"urn:mace:incommon:iap:silver\" --scopes \"openid admin\")",
+      "Bash(go run cmd/iam-cli/main.go test-policy -c config/policy.example.yaml -m POST -p /api/admin/users -a \"urn:mace:incommon:iap:silver\" -s \"openid admin\")",
+      "Bash(MSYS_NO_PATHCONV=1 go run cmd/iam-cli/main.go test-policy -c config/policy.example.yaml -m POST -p /api/admin/users -a \"urn:mace:incommon:iap:silver\" -s \"openid admin\")",
+      "Bash(go run cmd/iam-cli/main.go parse-challenge 'Bearer realm=\"\"MyApp\"\", error=\"\"insufficient_user_authentication\"\", acr_values=\"\"urn:mace:incommon:iap:gold\"\", max_age=300')"
+    ]
+  }
+}

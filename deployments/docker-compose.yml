@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  iam-service:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      IAM_ADDR: ":8080"
+      IAM_POLICY_FILE: "/app/config/policy.yaml"
+      IAM_REALM: "MyApp"
+      IAM_UPSTREAM_URL: "http://backend:3000"
+    volumes:
+      - ../config/policy.example.yaml:/app/config/policy.yaml:ro
+    depends_on:
+      - redis
+    networks:
+      - iam-net
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - iam-net
+
+  # Example backend service (replace with your own)
+  backend:
+    image: nginx:alpine
+    ports:
+      - "3000:80"
+    networks:
+      - iam-net
+
+networks:
+  iam-net:
+    driver: bridge

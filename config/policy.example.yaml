@@ -1,0 +1,59 @@
+version: "1"
+realm: "MyApp"
+
+# ACR level hierarchy - higher index = higher assurance level
+acr_levels:
+  - "urn:mace:incommon:iap:bronze"
+  - "urn:mace:incommon:iap:silver"
+  - "urn:mace:incommon:iap:gold"
+
+policies:
+  # Public read access - no auth requirements
+  - name: public-read
+    enabled: true
+    resources:
+      - /api/public/**
+      - /health
+    methods: [GET]
+
+  # Authenticated users can read their profile
+  - name: user-profile
+    enabled: true
+    resources:
+      - /api/users/me
+      - /api/users/me/**
+    methods: []  # all methods
+    require_acr: "urn:mace:incommon:iap:bronze"
+    require_scopes: [openid, profile]
+
+  # Payment operations require silver ACR and fresh auth (5 min)
+  - name: payments
+    enabled: true
+    resources:
+      - /api/payments/**
+    methods: [POST, PUT, DELETE]
+    require_acr: "urn:mace:incommon:iap:silver"
+    max_age: 300   # 5 minutes
+    require_scopes: [payments:write]
+
+  # Admin panel requires gold ACR + MFA
+  - name: admin
+    enabled: true
+    resources:
+      - /api/admin/**
+    methods: []
+    require_acr: "urn:mace:incommon:iap:gold"
+    max_age: 900   # 15 minutes
+    require_mfa: true
+    require_scopes: [admin]
+
+  # High-value transfers require gold + very fresh auth (1 min)
+  - name: high-value-transfers
+    enabled: true
+    resources:
+      - /api/payments/transfer
+    methods: [POST]
+    require_acr: "urn:mace:incommon:iap:gold"
+    max_age: 60    # 1 minute
+    require_mfa: true
+    require_scopes: [payments:write, payments:transfer]
