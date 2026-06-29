@@ -2,10 +2,15 @@ package token
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 // RevocationEvent represents a token revocation notification.
@@ -53,8 +58,25 @@ func (h *RevocationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read the full body once so we can both verify the HMAC and decode the JSON.
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB max
+	if err != nil {
+		http.Error(w, "reading request body", http.StatusBadRequest)
+		return
+	}
+
+	// Verify HMAC-SHA256 signature when a secret is configured.
+	// Header format: X-Hub-Signature-256: sha256=<hex>
+	if h.secret != "" {
+		sig := r.Header.Get("X-Hub-Signature-256")
+		if !verifyHMACSHA256(sig, body, h.secret) {
+			http.Error(w, "invalid webhook signature", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	var event RevocationEvent
-	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+	if err := json.Unmarshal(body, &event); err != nil {
 		http.Error(w, "invalid payload", http.StatusBadRequest)
 		return
 	}
@@ -66,6 +88,22 @@ func (h *RevocationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// verifyHMACSHA256 checks that sig == "sha256=<hmac-sha256(secret, body)>".
+func verifyHMACSHA256(sig string, body []byte, secret string) bool {
+	const prefix = "sha256="
+	if !strings.HasPrefix(sig, prefix) {
+		return false
+	}
+	sigBytes, err := hex.DecodeString(strings.TrimPrefix(sig, prefix))
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	expected := mac.Sum(nil)
+	return hmac.Equal(sigBytes, expected)
 }
 
 func (h *RevocationHandler) process(ctx context.Context, event *RevocationEvent) error {

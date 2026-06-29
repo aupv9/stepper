@@ -19,15 +19,18 @@ import (
 //   - Step-up challenge issuance (RFC 9470)
 //   - Multi-tenant provider dispatch
 type Guard struct {
-	registry     *tenant.Registry
-	resolver     tenant.Resolver
-	policyEngine *policy.Engine
-	realm        string
-	sm           *stepup.StateMachine
-	audit        *telemetry.AuditLogger
-	metrics      *telemetry.Metrics
-	next         http.Handler // upstream handler (proxy or direct)
-	cache        token.Cache  // optional; nil = no caching
+	registry      *tenant.Registry
+	resolver      tenant.Resolver
+	policyEngine  *policy.Engine
+	realm         string
+	sm            *stepup.StateMachine
+	audit         *telemetry.AuditLogger
+	metrics       *telemetry.Metrics
+	next          http.Handler // upstream handler (proxy or direct)
+	cache         token.Cache  // optional; nil = no caching
+	enableDPoP    bool
+	webhookSecret string
+	cookieSecret  string
 }
 
 // GuardConfig holds Guard dependencies.
@@ -44,6 +47,19 @@ type GuardConfig struct {
 	// When set, introspection results are cached and the RevocationHandler
 	// uses the same cache so revocations take effect immediately.
 	Cache token.Cache
+
+	// EnableDPoP enforces RFC 9449 DPoP proof-of-possession on every request.
+	// When true, requests without a valid DPoP proof header are rejected with 401.
+	EnableDPoP bool
+
+	// WebhookSecret is the HMAC-SHA256 secret used to authenticate revocation webhook
+	// calls on /webhook/revoke. Leave empty to disable signature verification (dev only).
+	WebhookSecret string
+
+	// CookieSecret signs the step-up state cookie so clients cannot tamper with it.
+	// Leave empty to disable cookie-based step-up state (challenges will still be issued
+	// but the original request won't be replayed automatically after re-auth).
+	CookieSecret string
 }
 
 // NewGuard creates a ResourceServerGuard.
@@ -53,15 +69,18 @@ func NewGuard(cfg GuardConfig) *Guard {
 		realm = "IAM"
 	}
 	return &Guard{
-		registry:     cfg.Registry,
-		resolver:     cfg.Resolver,
-		policyEngine: cfg.PolicyEngine,
-		realm:        realm,
-		sm:           stepup.NewStateMachine(),
-		audit:        cfg.Audit,
-		metrics:      cfg.Metrics,
-		next:         cfg.Upstream,
-		cache:        cfg.Cache,
+		registry:      cfg.Registry,
+		resolver:      cfg.Resolver,
+		policyEngine:  cfg.PolicyEngine,
+		realm:         realm,
+		sm:            stepup.NewStateMachine(),
+		audit:         cfg.Audit,
+		metrics:       cfg.Metrics,
+		next:          cfg.Upstream,
+		cache:         cfg.Cache,
+		enableDPoP:    cfg.EnableDPoP,
+		webhookSecret: cfg.WebhookSecret,
+		cookieSecret:  cfg.CookieSecret,
 	}
 }
 
@@ -89,6 +108,14 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "missing or invalid bearer token", "", 0)
 		return
+	}
+
+	// 3a. DPoP proof-of-possession (RFC 9449) — only when explicitly enabled
+	if g.enableDPoP {
+		if _, dpopErr := token.ValidateDPoP(r, rawToken, token.DefaultDPoPConfig()); dpopErr != nil {
+			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "DPoP validation failed: "+dpopErr.Error(), "", 0)
+			return
+		}
 	}
 
 	// 4. Introspect token (cache-first when a cache is configured)
@@ -124,7 +151,12 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 6. Attach tenant + claims to context, pass to next handler
+	// 6. Clear any pending step-up cookie now that auth succeeded.
+	if g.cookieSecret != "" {
+		stepup.ClearStateCookie(w)
+	}
+
+	// 7. Attach tenant + claims to context, pass to next handler.
 	ctx = tenant.WithTenantID(ctx, tenantID)
 	g.next.ServeHTTP(w, r.WithContext(ctx))
 }
@@ -163,7 +195,7 @@ func (g *Guard) RevocationHandler() http.Handler {
 	if c == nil {
 		c = token.NewMemoryCache()
 	}
-	return token.NewRevocationHandler(c, "", nil)
+	return token.NewRevocationHandler(c, g.webhookSecret, nil)
 }
 
 func (g *Guard) handleDenial(ctx context.Context, w http.ResponseWriter, r *http.Request, subject, tenantID string, result *policy.PolicyResult) {
@@ -183,7 +215,14 @@ func (g *Guard) handleDenial(ctx context.Context, w http.ResponseWriter, r *http
 
 	stepErr := stepup.NewInsufficientACRError(result.RequiredACR, result.RequiredMaxAge)
 	challenge := stepup.NewStepUpChallenge(stepErr, g.realm)
-	g.sm.BeginChallenge(r, challenge) //nolint:errcheck
+	flow, _ := g.sm.BeginChallenge(r, challenge)
+
+	// Persist the original request in a signed cookie so it can be replayed
+	// automatically once the client obtains a higher-assurance token.
+	if g.cookieSecret != "" && flow != nil {
+		stepup.SetStateCookie(w, flow.SavedRequest, g.cookieSecret) //nolint:errcheck
+	}
+
 	challenge.WriteChallenge(w)
 }
 

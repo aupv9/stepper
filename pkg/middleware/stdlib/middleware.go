@@ -43,6 +43,17 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 				return
 			}
 
+			if cfg.EnableDPoP {
+				if _, dpopErr := token.ValidateDPoP(r, rawToken, token.DefaultDPoPConfig()); dpopErr != nil {
+					(&stepup.StepUpChallenge{
+						Error:            stepup.ErrCodeInvalidToken,
+						ErrorDescription: "DPoP validation failed: " + dpopErr.Error(),
+						Realm:            cfg.Realm,
+					}).WriteChallenge(w)
+					return
+				}
+			}
+
 			claims, err := cfg.Provider.Introspect(r.Context(), rawToken)
 			if err != nil || !claims.Active {
 				challenge := &stepup.StepUpChallenge{

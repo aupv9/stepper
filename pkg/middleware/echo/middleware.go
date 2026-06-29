@@ -32,6 +32,12 @@ func Middleware(cfg Config) echo.MiddlewareFunc {
 				return echoChallenge(c, cfg.Realm, stepup.ErrCodeInvalidToken, "missing or invalid bearer token", "", 0)
 			}
 
+			if cfg.EnableDPoP {
+				if _, dpopErr := token.ValidateDPoP(c.Request(), rawToken, token.DefaultDPoPConfig()); dpopErr != nil {
+					return echoChallenge(c, cfg.Realm, stepup.ErrCodeInvalidToken, "DPoP validation failed: "+dpopErr.Error(), "", 0)
+				}
+			}
+
 			claims, err := cfg.Provider.Introspect(c.Request().Context(), rawToken)
 			if err != nil || !claims.Active {
 				return echoChallenge(c, cfg.Realm, stepup.ErrCodeInvalidToken, "token inactive or validation failed", "", 0)

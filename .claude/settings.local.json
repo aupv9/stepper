@@ -12,7 +12,23 @@
       "Bash(go run cmd/iam-cli/main.go test-policy --config config/policy.example.yaml --method POST --path /api/admin/users --acr \"urn:mace:incommon:iap:silver\" --scopes \"openid admin\")",
       "Bash(go run cmd/iam-cli/main.go test-policy -c config/policy.example.yaml -m POST -p /api/admin/users -a \"urn:mace:incommon:iap:silver\" -s \"openid admin\")",
       "Bash(MSYS_NO_PATHCONV=1 go run cmd/iam-cli/main.go test-policy -c config/policy.example.yaml -m POST -p /api/admin/users -a \"urn:mace:incommon:iap:silver\" -s \"openid admin\")",
-      "Bash(go run cmd/iam-cli/main.go parse-challenge 'Bearer realm=\"\"MyApp\"\", error=\"\"insufficient_user_authentication\"\", acr_values=\"\"urn:mace:incommon:iap:gold\"\", max_age=300')"
+      "Bash(go run cmd/iam-cli/main.go parse-challenge 'Bearer realm=\"\"MyApp\"\", error=\"\"insufficient_user_authentication\"\", acr_values=\"\"urn:mace:incommon:iap:gold\"\", max_age=300')",
+      "Bash(rtk ls *)",
+      "Bash(rtk tree *)",
+      "Bash(rtk find *)",
+      "Bash(rtk git *)",
+      "Bash(rtk grep *)",
+      "Bash(rtk read *)",
+      "Bash(find /Users/aupv/.claude -name \"*.md\" -path \"*/agents/*\" -o -name \"*.md\" -path \"*/commands/*\" 2>/dev/null | head -30)",
+      "Read(//Users/aupv/.claude/**)",
+      "Bash(mkdir -p /Users/aupv/github/stepper/.claude/agents /Users/aupv/github/stepper/.claude/commands && echo \"done\")",
+      "mcp__headroom__headroom_compress",
+      "mcp__headroom__headroom_retrieve",
+      "Bash(rtk go *)",
+      "Bash(rtk make *)"
+    ],
+    "additionalDirectories": [
+      "/Users/aupv/github/stepper/.claude"
     ]
   }
 }

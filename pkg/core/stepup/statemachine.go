@@ -2,11 +2,22 @@ package stepup
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
+)
+
+const (
+	// CookieName is the cookie used to carry SavedRequest state across the re-auth redirect.
+	CookieName = "iam_stepup_state"
+	cookieMaxAge = 600 // 10 minutes
 )
 
 // State represents the current step in the step-up authentication flow.
@@ -144,4 +155,87 @@ func WithFlowState(ctx context.Context, flow *FlowState) context.Context {
 func FlowStateFromContext(ctx context.Context) (*FlowState, bool) {
 	flow, ok := ctx.Value(stepUpStateKey).(*FlowState)
 	return flow, ok
+}
+
+// --- Cookie-based step-up state (stateless, HMAC-signed) ---
+
+// SetStateCookie writes the SavedRequest into a signed, HttpOnly cookie on the response.
+// The cookie survives the redirect to the AS and back, letting the guard replay the
+// original request once the new token satisfies the required ACR.
+// signingKey should be a random secret shared across service instances (e.g. IAM_COOKIE_SECRET).
+func SetStateCookie(w http.ResponseWriter, saved *SavedRequest, signingKey string) error {
+	payload, err := saved.Encode()
+	if err != nil {
+		return fmt.Errorf("encoding saved request: %w", err)
+	}
+
+	// Append HMAC so the client cannot tamper with the state.
+	sig := signPayload(payload, signingKey)
+	value := payload + "." + sig
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     CookieName,
+		Value:    value,
+		MaxAge:   cookieMaxAge,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		// Secure is enforced by the caller (set to true in production via TLS).
+	})
+	return nil
+}
+
+// ClearStateCookie removes the step-up cookie after a successful re-authentication.
+func ClearStateCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     CookieName,
+		Value:    "",
+		MaxAge:   -1,
+		Path:     "/",
+		HttpOnly: true,
+	})
+}
+
+// ReadStateCookie reads and verifies the step-up cookie from the request.
+// Returns nil, nil when the cookie is absent.
+func ReadStateCookie(r *http.Request, signingKey string) (*SavedRequest, error) {
+	cookie, err := r.Cookie(CookieName)
+	if err != nil {
+		return nil, nil // absent
+	}
+
+	parts := strings.SplitN(cookie.Value, ".", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("malformed step-up cookie")
+	}
+	payload, sig := parts[0], parts[1]
+
+	expected := signPayload(payload, signingKey)
+	if !hmac.Equal([]byte(sig), []byte(expected)) {
+		return nil, fmt.Errorf("invalid step-up cookie signature")
+	}
+
+	saved, err := DecodeSavedRequest(payload)
+	if err != nil {
+		return nil, fmt.Errorf("decoding step-up cookie: %w", err)
+	}
+
+	// Reject expired cookies regardless of MaxAge header (defence in depth).
+	if time.Since(saved.SavedAt) > cookieMaxAge*time.Second {
+		return nil, fmt.Errorf("step-up cookie expired")
+	}
+	return saved, nil
+}
+
+// newStateID generates a random opaque state ID for CSRF protection.
+func newStateID() string {
+	b := make([]byte, 16)
+	rand.Read(b) //nolint:errcheck
+	return hex.EncodeToString(b)
+}
+
+func signPayload(payload, key string) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte(payload))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

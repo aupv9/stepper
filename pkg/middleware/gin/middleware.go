@@ -32,6 +32,13 @@ func Middleware(cfg Config) gin.HandlerFunc {
 			return
 		}
 
+		if cfg.EnableDPoP {
+			if _, dpopErr := token.ValidateDPoP(c.Request, rawToken, token.DefaultDPoPConfig()); dpopErr != nil {
+				issueChallenge(c, cfg.Realm, stepup.ErrCodeInvalidToken, "DPoP validation failed: "+dpopErr.Error(), "", 0)
+				return
+			}
+		}
+
 		claims, err := cfg.Provider.Introspect(c.Request.Context(), rawToken)
 		if err != nil || !claims.Active {
 			issueChallenge(c, cfg.Realm, stepup.ErrCodeInvalidToken, "token inactive or validation failed", "", 0)

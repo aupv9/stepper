@@ -20,7 +20,7 @@ func New(cfg *Config) *Engine {
 // Returns a PolicyResult indicating if access is allowed and what is required.
 func (e *Engine) Evaluate(req *PolicyRequest) (*PolicyResult, error) {
 	if e.config == nil {
-		return &PolicyResult{Allowed: true}, nil
+		return &PolicyResult{Allowed: false, Reason: "no policy config loaded"}, nil
 	}
 
 	for i := range e.config.Policies {
@@ -36,8 +36,8 @@ func (e *Engine) Evaluate(req *PolicyRequest) (*PolicyResult, error) {
 		return e.check(p, req), nil
 	}
 
-	// No policy matched = allow by default
-	return &PolicyResult{Allowed: true}, nil
+	// No policy matched = deny by default (defence-in-depth)
+	return &PolicyResult{Allowed: false, Reason: "no matching policy"}, nil
 }
 
 // matchesPolicy returns true if this request falls under the policy's scope.
