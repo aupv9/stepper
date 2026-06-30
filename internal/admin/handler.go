@@ -41,6 +41,12 @@ func New(cfg Config) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The UI page itself is served without Bearer auth — it prompts the user
+	// for the token in-browser and uses it for subsequent API calls.
+	if r.URL.Path == "/ui" || r.URL.Path == "/ui/" {
+		UIHandler().ServeHTTP(w, r)
+		return
+	}
 	if h.adminToken != "" && !h.checkBearer(r) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="IAM Admin"`)
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)

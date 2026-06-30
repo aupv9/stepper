@@ -3,6 +3,8 @@ package token
 import (
 	"errors"
 	"time"
+
+	"github.com/common-iam/iam/pkg/core/rar"
 )
 
 // Sentinel errors for token operations.
@@ -39,6 +41,10 @@ type CommonClaims struct {
 
 	// Tenant
 	TenantID string `json:"tenant_id"`
+
+	// AuthorizationDetails carries RFC 9396 Rich Authorization Request details
+	// when the token was issued with an authorization_details claim.
+	AuthorizationDetails []rar.AuthorizationDetail `json:"authorization_details,omitempty"`
 
 	// Raw extra claims from provider
 	Extra map[string]interface{}

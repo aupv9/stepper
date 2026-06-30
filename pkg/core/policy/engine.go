@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/common-iam/iam/pkg/core/rar"
 )
 
 // Engine evaluates access policies against incoming requests.
@@ -96,6 +98,15 @@ func (e *Engine) check(p *Policy, req *PolicyRequest) *PolicyResult {
 		if !containsString(req.TokenAMR, "mfa") && !containsString(req.TokenAMR, "otp") && !containsString(req.TokenAMR, "hwk") {
 			result.Allowed = false
 			result.Reason = "MFA authentication method required"
+			return result
+		}
+	}
+
+	// Check RFC 9396 authorization_details
+	if len(p.RequireAuthorizationDetails) > 0 {
+		if ok, missing := rar.MatchAll(p.RequireAuthorizationDetails, req.AuthorizationDetails); !ok {
+			result.Allowed = false
+			result.Reason = "authorization_details insufficient: " + missing
 			return result
 		}
 	}

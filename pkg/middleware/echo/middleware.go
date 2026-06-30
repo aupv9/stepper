@@ -45,12 +45,13 @@ func Middleware(cfg Config) echo.MiddlewareFunc {
 
 			if cfg.PolicyEngine != nil {
 				result, evalErr := cfg.PolicyEngine.Evaluate(&policy.PolicyRequest{
-					Method:      c.Request().Method,
-					Path:        c.Request().URL.Path,
-					TokenACR:    claims.ACR,
-					TokenAMR:    claims.AMR,
-					TokenScopes: claims.Scopes,
-					AuthAge:     claims.AuthAge(),
+					Method:               c.Request().Method,
+					Path:                 c.Request().URL.Path,
+					TokenACR:             claims.ACR,
+					TokenAMR:             claims.AMR,
+					TokenScopes:          claims.Scopes,
+					AuthAge:              claims.AuthAge(),
+					AuthorizationDetails: claims.AuthorizationDetails,
 				})
 				if evalErr != nil {
 					return echo.ErrInternalServerError

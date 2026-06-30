@@ -1,8 +1,11 @@
 package policy
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/common-iam/iam/pkg/core/rar"
 )
 
 func TestEngine_DefaultDeny(t *testing.T) {
@@ -160,5 +163,71 @@ func TestEngine_HotReload(t *testing.T) {
 	result, _ = e.Evaluate(&PolicyRequest{Method: "GET", Path: "/v2/anything"})
 	if !result.Allowed {
 		t.Errorf("v2 path should be allowed after reload, got: %s", result.Reason)
+	}
+}
+
+func TestEngine_AuthorizationDetails_Required(t *testing.T) {
+	mustDecode := func(s string) []rar.AuthorizationDetail {
+		var d []rar.AuthorizationDetail
+		if err := json.Unmarshal([]byte(s), &d); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return d
+	}
+
+	cfg := &Config{
+		Policies: []Policy{
+			{
+				Name:      "payments-initiation",
+				Resources: []string{"/api/payments/**"},
+				Enabled:   true,
+				RequireAuthorizationDetails: []rar.AuthorizationDetailFilter{
+					{Type: "payment_initiation", Actions: []string{"initiate"}},
+				},
+			},
+		},
+	}
+	e := New(cfg)
+
+	// Token with matching authorization_details → allowed.
+	details := mustDecode(`[{"type":"payment_initiation","actions":["initiate","status"]}]`)
+	result, _ := e.Evaluate(&PolicyRequest{
+		Method:               "POST",
+		Path:                 "/api/payments/transfer",
+		AuthorizationDetails: details,
+	})
+	if !result.Allowed {
+		t.Errorf("expected allowed with matching authorization_details, got: %s", result.Reason)
+	}
+
+	// Token without authorization_details → denied.
+	result2, _ := e.Evaluate(&PolicyRequest{
+		Method: "POST",
+		Path:   "/api/payments/transfer",
+	})
+	if result2.Allowed {
+		t.Error("expected denied when authorization_details absent")
+	}
+
+	// Token with wrong action → denied.
+	wrong := mustDecode(`[{"type":"payment_initiation","actions":["status"]}]`)
+	result3, _ := e.Evaluate(&PolicyRequest{
+		Method:               "POST",
+		Path:                 "/api/payments/transfer",
+		AuthorizationDetails: wrong,
+	})
+	if result3.Allowed {
+		t.Error("expected denied when required action missing")
+	}
+
+	// Token with wrong type → denied.
+	wrongType := mustDecode(`[{"type":"account_information","actions":["initiate"]}]`)
+	result4, _ := e.Evaluate(&PolicyRequest{
+		Method:               "POST",
+		Path:                 "/api/payments/transfer",
+		AuthorizationDetails: wrongType,
+	})
+	if result4.Allowed {
+		t.Error("expected denied when authorization_detail type doesn't match")
 	}
 }

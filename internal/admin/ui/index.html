@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IAM Policy Editor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0d1117;
+      --surface: #161b22;
+      --border:  #30363d;
+      --text:    #c9d1d9;
+      --muted:   #8b949e;
+      --accent:  #58a6ff;
+      --success: #3fb950;
+      --error:   #f85149;
+      --warn:    #d29922;
+      --mono:    "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", Menlo, monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 24px;
+      letter-spacing: -0.3px;
+    }
+
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    label {
+      font-size: 13px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    input[type="text"],
+    input[type="password"] {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      padding: 6px 10px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input[type="text"]:focus,
+    input[type="password"]:focus {
+      border-color: var(--accent);
+    }
+
+    button {
+      background: #21262d;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 6px 14px;
+      transition: background 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+
+    button:hover { background: #30363d; border-color: #8b949e; }
+    button:active { background: #161b22; }
+
+    button.primary {
+      background: #1f6feb;
+      border-color: #1f6feb;
+      color: #fff;
+    }
+
+    button.primary:hover { background: #388bfd; border-color: #388bfd; }
+    button.primary:disabled { background: #21262d; border-color: var(--border); color: var(--muted); cursor: default; }
+
+    pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-x: auto;
+      padding: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #e6edf3;
+      min-height: 60px;
+    }
+
+    textarea {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: #e6edf3;
+      display: block;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+      min-height: 280px;
+      outline: none;
+      padding: 12px;
+      resize: vertical;
+      transition: border-color 0.15s;
+      width: 100%;
+    }
+
+    textarea:focus { border-color: var(--accent); }
+
+    .banner {
+      border-radius: 6px;
+      display: none;
+      font-size: 13px;
+      margin-top: 12px;
+      padding: 10px 14px;
+    }
+
+    .banner.success { background: #0d1f0f; border: 1px solid #238636; color: var(--success); display: block; }
+    .banner.error   { background: #1c0a09; border: 1px solid #6e1e1e; color: var(--error);   display: block; }
+    .banner.loading { background: #111820; border: 1px solid #1f6feb; color: var(--accent);  display: block; }
+
+    .placeholder { color: var(--muted); font-style: italic; }
+  </style>
+</head>
+<body>
+
+<h1>IAM Policy Editor</h1>
+
+<!-- Auth section -->
+<div class="section">
+  <div class="section-title">Authentication</div>
+  <div class="row">
+    <label for="token">Admin Token</label>
+    <input type="password" id="token" placeholder="Bearer token (IAM_ADMIN_TOKEN)" autocomplete="off">
+    <button id="loadBtn" onclick="loadPolicy()">Load Policy</button>
+  </div>
+</div>
+
+<!-- Current policy (JSON) -->
+<div class="section">
+  <div class="section-title">Current Policy (JSON)</div>
+  <pre id="policyJSON"><span class="placeholder">Click "Load Policy" to fetch the current policy.</span></pre>
+</div>
+
+<!-- YAML editor -->
+<div class="section">
+  <div class="section-title">Edit Policy YAML</div>
+  <textarea id="yamlEditor" spellcheck="false" placeholder="# Paste or edit your policy YAML here&#10;# then click Reload Policy&#10;&#10;acr_levels:&#10;  - bronze&#10;  - silver&#10;  - gold&#10;&#10;policies: []"></textarea>
+  <div style="margin-top: 10px; display: flex; align-items: center; gap: 8px;">
+    <button class="primary" id="reloadBtn" onclick="reloadPolicy()">Reload Policy</button>
+    <button onclick="clearEditor()">Clear</button>
+  </div>
+  <div class="banner" id="reloadBanner"></div>
+</div>
+
+<script>
+  'use strict';
+
+  function token() {
+    return document.getElementById('token').value.trim();
+  }
+
+  function authHeaders(extra) {
+    const h = Object.assign({ 'Authorization': 'Bearer ' + token() }, extra || {});
+    return h;
+  }
+
+  async function loadPolicy() {
+    const btn = document.getElementById('loadBtn');
+    const pre = document.getElementById('policyJSON');
+
+    if (!token()) {
+      pre.innerHTML = '<span style="color:var(--error)">Please enter an admin token first.</span>';
+      return;
+    }
+
+    btn.disabled = true;
+    pre.innerHTML = '<span class="placeholder">Loading…</span>';
+
+    try {
+      const resp = await fetch('/admin/policy/summary', {
+        method: 'GET',
+        headers: authHeaders()
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        pre.innerHTML = '<span style="color:var(--error)">Error ' + resp.status + ': ' + escHtml(text) + '</span>';
+        return;
+      }
+
+      const data = await resp.json();
+      pre.textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      pre.innerHTML = '<span style="color:var(--error)">Fetch failed: ' + escHtml(String(err)) + '</span>';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function reloadPolicy() {
+    const btn     = document.getElementById('reloadBtn');
+    const banner  = document.getElementById('reloadBanner');
+    const yaml    = document.getElementById('yamlEditor').value;
+
+    if (!token()) {
+      showBanner('error', 'Please enter an admin token first.');
+      return;
+    }
+    if (!yaml.trim()) {
+      showBanner('error', 'YAML editor is empty. Paste your policy YAML first.');
+      return;
+    }
+
+    btn.disabled = true;
+    showBanner('loading', 'Sending policy to server…');
+
+    try {
+      const body = JSON.stringify({ yaml: yaml });
+      const resp = await fetch('/admin/policy/reload', {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: body
+      });
+
+      const text = await resp.text();
+      if (!resp.ok) {
+        showBanner('error', 'Error ' + resp.status + ': ' + text);
+        return;
+      }
+
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
+      showBanner('success', 'Policy reloaded successfully.\n\n' + pretty);
+
+      // Refresh the displayed JSON summary
+      await loadPolicy();
+    } catch (err) {
+      showBanner('error', 'Fetch failed: ' + String(err));
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function clearEditor() {
+    document.getElementById('yamlEditor').value = '';
+    hideBanner();
+  }
+
+  function showBanner(type, msg) {
+    const banner = document.getElementById('reloadBanner');
+    banner.className = 'banner ' + type;
+    banner.textContent = msg;
+  }
+
+  function hideBanner() {
+    const banner = document.getElementById('reloadBanner');
+    banner.className = 'banner';
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // Allow Ctrl+Enter in the textarea to trigger reload
+  document.getElementById('yamlEditor').addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      reloadPolicy();
+    }
+  });
+</script>
+
+</body>
+</html>

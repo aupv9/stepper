@@ -25,7 +25,10 @@
       "mcp__headroom__headroom_compress",
       "mcp__headroom__headroom_retrieve",
       "Bash(rtk go *)",
-      "Bash(rtk make *)"
+      "Bash(rtk make *)",
+      "Bash(go get *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(rtk proxy *)"
     ],
     "additionalDirectories": [
       "/Users/aupv/github/stepper/.claude"

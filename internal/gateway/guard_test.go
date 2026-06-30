@@ -401,3 +401,110 @@ func TestGuard_MultiTenant_TokenIsolation(t *testing.T) {
 		t.Errorf("acme token vs bravo tenant: expected 401, got %d", respBad.StatusCode)
 	}
 }
+
+// TestGuard_StepUpCookieReplay verifies that when a client returns to /callback with a
+// higher-assurance token and the step-up state cookie, the guard transparently forwards
+// the request to the original saved path (/original) instead of /callback.
+func TestGuard_StepUpCookieReplay(t *testing.T) {
+	as, provider := setupAS(t)
+
+	// Policy: /original requires silver ACR; /callback is open to any valid token
+	// (the policy engine denies by default when no policy matches, so /callback
+	// needs an explicit allow-with-bronze rule so the silver token passes through).
+	pCfg := &policy.Config{
+		ACRLevels: []string{"urn:mace:incommon:iap:bronze", "urn:mace:incommon:iap:silver"},
+		Policies: []policy.Policy{
+			{
+				Name:       "need-silver-for-original",
+				Resources:  []string{"/original"},
+				RequireACR: "urn:mace:incommon:iap:silver",
+				Enabled:    true,
+			},
+			{
+				// /callback is the re-auth landing path — allow any valid token (bronze+).
+				Name:       "allow-callback",
+				Resources:  []string{"/callback"},
+				RequireACR: "urn:mace:incommon:iap:bronze",
+				Enabled:    true,
+			},
+		},
+	}
+
+	// Track which path the upstream next handler received.
+	var upstreamPath string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, srv := buildGuard(t, provider, gateway.GuardConfig{
+		PolicyEngine: policy.New(pCfg),
+		CookieSecret: "test-replay-secret",
+		Upstream:     upstream,
+	})
+
+	// Step 1: hit /original with a bronze token → expect 401 + cookie set.
+	bronzeToken, err := as.IssueToken(tokenfactory.TokenOptions{
+		Subject:   "grace",
+		ACR:       "urn:mace:incommon:iap:bronze",
+		Scopes:    []string{"openid"},
+		ExpiresIn: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("IssueToken (bronze): %v", err)
+	}
+
+	req1, _ := http.NewRequest(http.MethodGet, srv.URL+"/original", nil)
+	req1.Header.Set("Authorization", "Bearer "+bronzeToken)
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if resp1.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("first request: expected 401, got %d", resp1.StatusCode)
+	}
+
+	// Capture the step-up state cookie.
+	var stepupCookie *http.Cookie
+	for _, c := range resp1.Cookies() {
+		if c.Name == "iam_stepup_state" {
+			stepupCookie = c
+			break
+		}
+	}
+	if stepupCookie == nil {
+		t.Fatal("expected iam_stepup_state cookie on step-up challenge response")
+	}
+
+	// Step 2: client obtains a silver token and hits /callback (not /original).
+	silverToken, err := as.IssueToken(tokenfactory.TokenOptions{
+		Subject:   "grace",
+		ACR:       "urn:mace:incommon:iap:silver",
+		Scopes:    []string{"openid"},
+		ExpiresIn: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("IssueToken (silver): %v", err)
+	}
+
+	req2, _ := http.NewRequest(http.MethodGet, srv.URL+"/callback", nil)
+	req2.Header.Set("Authorization", "Bearer "+silverToken)
+	// Attach the step-up state cookie captured from the denial response.
+	for _, c := range resp1.Cookies() {
+		req2.AddCookie(c)
+	}
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+
+	// Guard must have let the request through (silver satisfies policy for /original).
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("second request: expected 200, got %d", resp2.StatusCode)
+	}
+
+	// The upstream must have seen the original path, not /callback.
+	if upstreamPath != "/original" {
+		t.Errorf("upstream received path %q, want %q", upstreamPath, "/original")
+	}
+}

@@ -151,6 +151,22 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Step-up cookie replay: if the client returned with a higher-assurance token
+	// from a different path (e.g., /callback), forward to the original saved resource.
+	if g.cookieSecret != "" {
+		if saved, cookieErr := stepup.ReadStateCookie(r, g.cookieSecret); cookieErr == nil && saved != nil {
+			if saved.Path != "" && saved.Path != r.URL.Path {
+				r = r.Clone(r.Context())
+				r.URL.Path = saved.Path
+				r.URL.RawQuery = saved.Query
+				r.RequestURI = saved.Path
+				if saved.Query != "" {
+					r.RequestURI += "?" + saved.Query
+				}
+			}
+		}
+	}
+
 	// 6. Clear any pending step-up cookie now that auth succeeded.
 	if g.cookieSecret != "" {
 		stepup.ClearStateCookie(w)

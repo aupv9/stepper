@@ -8,23 +8,29 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/common-iam/iam/pkg/core/rar"
 )
 
 // IntrospectionResponse is the RFC 7662 token introspection response.
+// The authorization_details field is an RFC 9396 extension.
 type IntrospectionResponse struct {
-	Active    bool   `json:"active"`
-	Sub       string `json:"sub"`
-	Iss       string `json:"iss"`
-	Exp       int64  `json:"exp"`
-	IAT       int64  `json:"iat"`
-	AuthTime  int64  `json:"auth_time"`
-	ACR       string `json:"acr"`
+	Active    bool     `json:"active"`
+	Sub       string   `json:"sub"`
+	Iss       string   `json:"iss"`
+	Exp       int64    `json:"exp"`
+	IAT       int64    `json:"iat"`
+	AuthTime  int64    `json:"auth_time"`
+	ACR       string   `json:"acr"`
 	AMR       []string `json:"amr"`
-	Scope     string `json:"scope"`
-	ClientID  string `json:"client_id"`
-	Username  string `json:"username"`
-	TokenType string `json:"token_type"`
-	JTI       string `json:"jti"`
+	Scope     string   `json:"scope"`
+	ClientID  string   `json:"client_id"`
+	Username  string   `json:"username"`
+	TokenType string   `json:"token_type"`
+	JTI       string   `json:"jti"`
+
+	// AuthorizationDetails carries RFC 9396 authorization_details when present.
+	AuthorizationDetails []rar.AuthorizationDetail `json:"authorization_details,omitempty"`
 }
 
 // IntrospectorConfig holds configuration for the token introspector.
@@ -114,6 +120,9 @@ func introToCommonClaims(r *IntrospectionResponse) *CommonClaims {
 	}
 	if r.Scope != "" {
 		c.Scopes = strings.Fields(r.Scope)
+	}
+	if len(r.AuthorizationDetails) > 0 {
+		c.AuthorizationDetails = r.AuthorizationDetails
 	}
 	return c
 }

@@ -68,12 +68,13 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 			// Policy evaluation
 			if cfg.PolicyEngine != nil {
 				result, err := cfg.PolicyEngine.Evaluate(&policy.PolicyRequest{
-					Method:      r.Method,
-					Path:        r.URL.Path,
-					TokenACR:    claims.ACR,
-					TokenAMR:    claims.AMR,
-					TokenScopes: claims.Scopes,
-					AuthAge:     claims.AuthAge(),
+					Method:               r.Method,
+					Path:                 r.URL.Path,
+					TokenACR:             claims.ACR,
+					TokenAMR:             claims.AMR,
+					TokenScopes:          claims.Scopes,
+					AuthAge:              claims.AuthAge(),
+					AuthorizationDetails: claims.AuthorizationDetails,
 				})
 				if err != nil {
 					http.Error(w, "policy evaluation error", http.StatusInternalServerError)

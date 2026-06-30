@@ -1,6 +1,10 @@
 package policy
 
-import "time"
+import (
+	"time"
+
+	"github.com/common-iam/iam/pkg/core/rar"
+)
 
 // Config is the top-level policy configuration loaded from YAML.
 type Config struct {
@@ -16,14 +20,19 @@ type Config struct {
 
 // Policy defines the access requirements for a set of resources.
 type Policy struct {
-	Name        string   `yaml:"name"`
-	Resources   []string `yaml:"resources"`   // glob patterns, e.g. /api/payments/**
-	Methods     []string `yaml:"methods"`     // HTTP methods, empty = all
-	RequireACR  string   `yaml:"require_acr"` // minimum acr_values required
-	MaxAge      int      `yaml:"max_age"`     // max auth age in seconds, 0 = unlimited
-	RequireMFA  bool     `yaml:"require_mfa"` // AMR must include mfa
+	Name          string   `yaml:"name"`
+	Resources     []string `yaml:"resources"`    // glob patterns, e.g. /api/payments/**
+	Methods       []string `yaml:"methods"`      // HTTP methods, empty = all
+	RequireACR    string   `yaml:"require_acr"`  // minimum acr_values required
+	MaxAge        int      `yaml:"max_age"`      // max auth age in seconds, 0 = unlimited
+	RequireMFA    bool     `yaml:"require_mfa"`  // AMR must include mfa
 	RequireScopes []string `yaml:"require_scopes"`
-	Enabled     bool     `yaml:"enabled"`
+
+	// RequireAuthorizationDetails enforces RFC 9396 authorization_details.
+	// All listed filters must be satisfied by the token's authorization_details claim.
+	RequireAuthorizationDetails []rar.AuthorizationDetailFilter `yaml:"require_authorization_details,omitempty"`
+
+	Enabled bool `yaml:"enabled"`
 }
 
 // PolicyRequest is the input to the policy engine.
@@ -34,6 +43,9 @@ type PolicyRequest struct {
 	TokenAMR    []string
 	TokenScopes []string
 	AuthAge     time.Duration // how long ago the user authenticated
+
+	// AuthorizationDetails carries RFC 9396 details extracted from the token.
+	AuthorizationDetails []rar.AuthorizationDetail
 }
 
 // PolicyResult is the output of policy evaluation.

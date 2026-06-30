@@ -47,12 +47,13 @@ func Middleware(cfg Config) gin.HandlerFunc {
 
 		if cfg.PolicyEngine != nil {
 			result, err := cfg.PolicyEngine.Evaluate(&policy.PolicyRequest{
-				Method:      c.Request.Method,
-				Path:        c.Request.URL.Path,
-				TokenACR:    claims.ACR,
-				TokenAMR:    claims.AMR,
-				TokenScopes: claims.Scopes,
-				AuthAge:     claims.AuthAge(),
+				Method:               c.Request.Method,
+				Path:                 c.Request.URL.Path,
+				TokenACR:             claims.ACR,
+				TokenAMR:             claims.AMR,
+				TokenScopes:          claims.Scopes,
+				AuthAge:              claims.AuthAge(),
+				AuthorizationDetails: claims.AuthorizationDetails,
 			})
 			if err != nil {
 				c.AbortWithStatus(http.StatusInternalServerError)

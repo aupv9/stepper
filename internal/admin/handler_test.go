@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/common-iam/iam/pkg/core/policy"
@@ -143,5 +144,62 @@ func TestAdminHandler_WWWAuthenticateHeader(t *testing.T) {
 	wwwAuth := w.Header().Get("WWW-Authenticate")
 	if wwwAuth == "" {
 		t.Error("expected WWW-Authenticate header on 401")
+	}
+}
+
+func TestAdminUI_ServesPolicyEditor(t *testing.T) {
+	// The UI is served without Bearer auth (it prompts the user in-browser).
+	// Test with a token-protected handler to confirm the UI bypasses auth.
+	h := newTestHandler("secret-token")
+
+	req := httptest.NewRequest(http.MethodGet, "/ui", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for /ui, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct == "" || len(ct) < 9 || ct[:9] != "text/html" {
+		t.Errorf("expected Content-Type text/html, got %q", ct)
+	}
+
+	body := w.Body.String()
+	if len(body) == 0 {
+		t.Error("expected non-empty HTML body")
+	}
+
+	// The page must mention "policy" (case-insensitive) somewhere in the content.
+	bodyLower := strings.ToLower(body)
+	if !strings.Contains(bodyLower, "policy") {
+		t.Error("expected body to contain 'policy'")
+	}
+}
+
+func TestAdminUI_ServesPolicyEditor_TrailingSlash(t *testing.T) {
+	h := newTestHandler("")
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for /ui/, got %d", w.Code)
+	}
+}
+
+func TestAdminUI_SecurityHeaders(t *testing.T) {
+	h := newTestHandler("")
+
+	req := httptest.NewRequest(http.MethodGet, "/ui", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("expected X-Frame-Options: DENY, got %q", got)
+	}
+	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("expected X-Content-Type-Options: nosniff, got %q", got)
 	}
 }
