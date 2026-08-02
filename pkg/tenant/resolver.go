@@ -15,6 +15,12 @@ type Resolver interface {
 
 // HeaderResolver reads the tenant ID from a request header.
 // Default header: X-Tenant-ID
+//
+// SECURITY: the header is client-controlled. Use HeaderResolver only behind a
+// trusted edge (ingress/API gateway) that sets or strips it; never expose it
+// directly to end users, or any caller can pick their tenant. The gateway
+// guard independently verifies that the token issuer matches the resolved
+// tenant's provider, but defense in depth starts at the edge.
 type HeaderResolver struct {
 	Header string
 }

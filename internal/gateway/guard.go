@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/common-iam/iam/pkg/core/fapi"
 	"github.com/common-iam/iam/pkg/core/policy"
 	"github.com/common-iam/iam/pkg/core/stepup"
 	"github.com/common-iam/iam/pkg/core/token"
+	"github.com/common-iam/iam/pkg/providers"
 	"github.com/common-iam/iam/pkg/telemetry"
 	"github.com/common-iam/iam/pkg/tenant"
 )
@@ -34,6 +37,7 @@ type Guard struct {
 	dpopNonce     *token.NonceProvider
 	webhookSecret string
 	cookieSecret  string
+	fapiCfg       *fapi.ValidationConfig
 }
 
 // GuardConfig holds Guard dependencies.
@@ -70,6 +74,10 @@ type GuardConfig struct {
 	// Leave empty to disable cookie-based step-up state (challenges will still be issued
 	// but the original request won't be replayed automatically after re-auth).
 	CookieSecret string
+
+	// FAPI, when set, enforces the FAPI 2.0 Security Profile on every request
+	// after introspection (fapi.DefaultFAPI2Config() for strict compliance).
+	FAPI *fapi.ValidationConfig
 }
 
 // NewGuard creates a ResourceServerGuard.
@@ -91,6 +99,7 @@ func NewGuard(cfg GuardConfig) *Guard {
 		enableDPoP:    cfg.EnableDPoP,
 		webhookSecret: cfg.WebhookSecret,
 		cookieSecret:  cfg.CookieSecret,
+		fapiCfg:       cfg.FAPI,
 	}
 	if cfg.EnableDPoP {
 		dpopCfg := token.DefaultDPoPConfig()
@@ -111,10 +120,12 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer span.End()
 	r = r.WithContext(ctx)
 
-	// 1. Resolve tenant
+	// 1. Resolve tenant — fail closed. Single-tenant deployments opt in to a
+	// default by appending tenant.NewStaticResolver to their resolver chain.
 	tenantID, err := g.resolver.Resolve(r)
 	if err != nil {
-		tenantID = "default"
+		g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "tenant resolution failed", "", 0)
+		return
 	}
 
 	// 2. Get provider for tenant
@@ -155,12 +166,28 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4a. DPoP key binding (RFC 9449 §6.1): the token's cnf.jkt must match the
+	// 4a. Cross-tenant binding: the token's issuer must match the resolved
+	// tenant's provider. Otherwise a valid token from tenant A could be
+	// presented under tenant B's header (with B's AS confirming nothing).
+	if iss := provider.Issuer(); iss != "" && claims.Issuer != "" && claims.Issuer != iss {
+		g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "token issuer does not match tenant provider", "", 0)
+		return
+	}
+
+	// 4b. DPoP key binding (RFC 9449 §6.1): the token's cnf.jkt must match the
 	// proof's JWK thumbprint, otherwise a stolen token can be used with the
 	// thief's own key.
 	if g.enableDPoP {
 		if bindErr := token.VerifyDPoPBinding(dpopProof, claims); bindErr != nil {
 			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "DPoP binding failed: "+bindErr.Error(), "", 0)
+			return
+		}
+	}
+
+	// 4c. FAPI 2.0 Security Profile enforcement, when configured.
+	if g.fapiCfg != nil {
+		if fapiErr := fapi.ValidateRequest(r, claims, *g.fapiCfg); fapiErr != nil {
+			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, fapiErr.Error(), "", 0)
 			return
 		}
 	}
@@ -211,9 +238,34 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		stepup.ClearStateCookie(w)
 	}
 
-	// 7. Attach tenant + claims to context, pass to next handler.
+	// 7. Header hygiene: drop identity headers the client may have spoofed,
+	// then re-inject values derived from the verified token and tenant so the
+	// upstream can trust X-Iam-* unconditionally.
+	sanitizeForwardHeaders(r.Header)
+	r.Header.Set("X-Iam-Subject", claims.Subject)
+	r.Header.Set("X-Iam-Tenant", tenantID)
+	if claims.ACR != "" {
+		r.Header.Set("X-Iam-Acr", claims.ACR)
+	}
+	if len(claims.Scopes) > 0 {
+		r.Header.Set("X-Iam-Scopes", strings.Join(claims.Scopes, " "))
+	}
+
+	// 8. Attach tenant + claims to context, pass to next handler.
 	ctx = tenant.WithTenantID(ctx, tenantID)
 	g.next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// sanitizeForwardHeaders removes client-supplied identity headers before the
+// request is proxied upstream. X-Tenant-ID is resolution *input* and must not
+// leak upstream as if it were verified; X-Iam-* are reserved for the gateway.
+func sanitizeForwardHeaders(h http.Header) {
+	h.Del("X-Tenant-ID")
+	for name := range h {
+		if strings.HasPrefix(strings.ToLower(name), "x-iam-") {
+			h.Del(name)
+		}
+	}
 }
 
 // completeStepUp finishes a pending step-up flow: it re-evaluates policy for
@@ -276,9 +328,7 @@ func (g *Guard) completeStepUp(ctx context.Context, w http.ResponseWriter, r *ht
 }
 
 // introspect fetches token claims, using the cache when available.
-func (g *Guard) introspect(ctx context.Context, provider interface {
-	Introspect(context.Context, string) (*token.CommonClaims, error)
-}, rawToken string) (*token.CommonClaims, error) {
+func (g *Guard) introspect(ctx context.Context, provider providers.Provider, rawToken string) (*token.CommonClaims, error) {
 	if g.cache != nil {
 		key := token.HashToken(rawToken)
 		if cached, ok := g.cache.Get(ctx, key); ok {

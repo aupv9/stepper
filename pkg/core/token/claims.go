@@ -74,6 +74,37 @@ func (c *CommonClaims) AuthAge() time.Duration {
 	return time.Since(c.AuthTime)
 }
 
+// --- FAPI 2.0 profile interface (pkg/core/fapi.TokenClaims) ---
+
+// HasDPoP reports whether the token is DPoP-bound (carries cnf.jkt).
+func (c *CommonClaims) HasDPoP() bool {
+	return c.Confirmation != nil && c.Confirmation.JKT != ""
+}
+
+// HasPARRequestURI reports whether the authorization was initiated via a
+// Pushed Authorization Request (request_uri or par_id claim present).
+func (c *CommonClaims) HasPARRequestURI() bool {
+	return c.extraString("request_uri") != "" || c.extraString("par_id") != ""
+}
+
+// GetAuthAge returns the time since user authentication (0 = unknown).
+func (c *CommonClaims) GetAuthAge() time.Duration {
+	return c.AuthAge()
+}
+
+// GetNonce returns the token's nonce claim, if any.
+func (c *CommonClaims) GetNonce() string {
+	return c.extraString("nonce")
+}
+
+func (c *CommonClaims) extraString(key string) string {
+	if c.Extra == nil {
+		return ""
+	}
+	s, _ := c.Extra[key].(string)
+	return s
+}
+
 // HasScope checks if the token contains a specific scope.
 func (c *CommonClaims) HasScope(scope string) bool {
 	for _, s := range c.Scopes {

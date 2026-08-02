@@ -55,7 +55,12 @@ func buildGuard(t *testing.T, provider *generic.Adapter, cfg gateway.GuardConfig
 		cfg.Registry = reg
 	}
 	if cfg.Resolver == nil {
-		cfg.Resolver = tenant.NewChainResolver(tenant.NewHeaderResolver("X-Tenant-ID"))
+		// Header resolver with explicit single-tenant fallback (fail-closed
+		// resolution requires opting in to a default via StaticResolver).
+		cfg.Resolver = tenant.NewChainResolver(
+			tenant.NewHeaderResolver("X-Tenant-ID"),
+			tenant.NewStaticResolver("default"),
+		)
 	}
 	if cfg.Upstream == nil {
 		cfg.Upstream = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -506,6 +511,67 @@ func TestGuard_StepUpCookieReplay(t *testing.T) {
 	// The upstream must have seen the original path, not /callback.
 	if upstreamPath != "/original" {
 		t.Errorf("upstream received path %q, want %q", upstreamPath, "/original")
+	}
+}
+
+// TestGuard_HeaderHygiene verifies that client-supplied identity headers are
+// stripped before proxying and replaced with values from the verified token.
+func TestGuard_HeaderHygiene(t *testing.T) {
+	as, provider := setupAS(t)
+
+	pCfg := &policy.Config{
+		Policies: []policy.Policy{
+			{Name: "open", Resources: []string{"/**"}, Enabled: true},
+		},
+	}
+
+	var got http.Header
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, srv := buildGuard(t, provider, gateway.GuardConfig{
+		PolicyEngine: policy.New(pCfg),
+		Upstream:     upstream,
+	})
+
+	raw, err := as.IssueToken(tokenfactory.TokenOptions{
+		Subject:   "alice",
+		ACR:       "urn:mace:incommon:iap:silver",
+		Scopes:    []string{"openid", "profile"},
+		ExpiresIn: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("IssueToken: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/resource", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	// Spoofed identity headers that must not reach the upstream.
+	req.Header.Set("X-Iam-Subject", "evil-admin")
+	req.Header.Set("X-Iam-Acr", "urn:mace:incommon:iap:gold")
+	req.Header.Set("X-Tenant-ID", "default")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	if got.Get("X-Iam-Subject") != "alice" {
+		t.Errorf("X-Iam-Subject = %q, want %q (spoofed value must be replaced)", got.Get("X-Iam-Subject"), "alice")
+	}
+	if got.Get("X-Iam-Acr") != "urn:mace:incommon:iap:silver" {
+		t.Errorf("X-Iam-Acr = %q, want verified silver ACR", got.Get("X-Iam-Acr"))
+	}
+	if got.Get("X-Iam-Tenant") != "default" {
+		t.Errorf("X-Iam-Tenant = %q, want %q", got.Get("X-Iam-Tenant"), "default")
+	}
+	if got.Get("X-Tenant-ID") != "" {
+		t.Errorf("X-Tenant-ID must be stripped before proxying, got %q", got.Get("X-Tenant-ID"))
 	}
 }
 
