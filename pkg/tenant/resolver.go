@@ -84,6 +84,26 @@ func (p *PathResolver) Resolve(r *http.Request) (string, error) {
 	return parts[p.Segment], nil
 }
 
+// --- Static Resolver ---
+
+// StaticResolver always resolves to a fixed tenant ID. Use it as the last
+// element of a ChainResolver to opt in to a default tenant for single-tenant
+// deployments; without it, tenant resolution fails closed.
+type StaticResolver struct {
+	TenantID string
+}
+
+func NewStaticResolver(tenantID string) *StaticResolver {
+	return &StaticResolver{TenantID: tenantID}
+}
+
+func (s *StaticResolver) Resolve(_ *http.Request) (string, error) {
+	if s.TenantID == "" {
+		return "", fmt.Errorf("static resolver has no tenant configured")
+	}
+	return s.TenantID, nil
+}
+
 // --- Chain Resolver ---
 
 // ChainResolver tries multiple resolvers in order, returning the first success.

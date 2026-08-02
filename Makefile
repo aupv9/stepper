@@ -1,4 +1,4 @@
-.PHONY: build test lint tidy docker-build cli
+.PHONY: build test lint tidy docker-build cli service fmt
 
 build:
 	go build ./...
@@ -16,10 +16,10 @@ docker-build:
 	docker build -f deployments/Dockerfile -t common-iam:latest .
 
 cli:
-	go run cmd/iam-cli/main.go
+	go run ./cmd/iam-cli
 
 service:
-	go run cmd/iam-service/main.go
+	go run ./cmd/iam-service
 
 fmt:
 	gofmt -w .
