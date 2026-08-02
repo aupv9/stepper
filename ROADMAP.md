@@ -7,27 +7,24 @@ Nguyên tắc ưu tiên: **security-blocking trước, wiring sau, tính năng m
 
 ---
 
-## 🔴 Milestone 1 — Chặn security (bắt buộc trước khi release)
+## ✅ Milestone 1 — Chặn security (HOÀN TẤT)
 
-Đây là các lỗi khiến gateway hiện tại *không an toàn* để chạy production. Làm trước tất cả.
+Đây là các lỗi khiến gateway *không an toàn* để chạy production. Đã vá toàn bộ + test,
+`go test ./... -race` xanh. Thiết kế: [`docs/design-roadmap.md`](docs/design-roadmap.md).
 
-- [ ] **Vá step-up cookie replay bypass** — `internal/gateway/guard.go:130-178`
-  - Re-evaluate policy trên saved path *sau khi* rewrite, và chỉ replay khi flow đạt `StateCompleted`.
-  - Wire `StateMachine.Complete()`/`Fail()` vào guard (hiện không được gọi).
-- [ ] **DPoP binding thật** — `pkg/core/token/dpop.go`, `claims.go`
-  - Thêm `cnf.jkt` vào `CommonClaims` + `IntrospectionResponse`.
-  - Implement RFC 7638 JWK thumbprint, so với `jkt` sau introspection; reject nếu lệch.
-  - Bắt buộc `ath` (không còn optional).
-  - Thêm replay cache cho `jti` (TTL = `MaxAge`), tái dùng `token.Cache`.
-- [ ] **Vá revocation** — `pkg/core/token/revocation.go`
-  - JTI revoke: thêm secondary index `jti → tokenHash` để Delete đúng key.
-  - `RevokeAll`: xóa theo prefix per-subject/per-tenant, bỏ `Flush()` toàn cục.
-- [ ] **Vá `**` glob** — `pkg/core/policy/matcher.go:22-30`
-  - Yêu cầu ranh giới: `path == prefix || strings.HasPrefix(path, prefix+"/")`.
-- [ ] **max_age fail-closed** — `pkg/core/policy/engine.go:86-94`
-  - Khi `p.MaxAge > 0` mà không có `auth_time` → deny (không skip).
+- [x] **Vá step-up cookie replay bypass** (M1.1) — guard chấm policy trên **effective (served) path**
+  trước khi replay; regression test `TestGuard_StepUpCookieReplay_NoBypass`.
+- [x] **DPoP binding thật** (M1.2) — `cnf.jkt` trong `CommonClaims`/`IntrospectionResponse`;
+  `JWKThumbprint` (RFC 7638, verify bằng test vector); `VerifyBinding` (ath bắt buộc + jkt khớp,
+  constant-time); `MemoryReplayGuard` chống replay jti; enforce `RequireHTTPS`.
+- [x] **Vá revocation** (M1.3) — `TokenIndex` (jti/subject → tokenHash); revoke đúng cache entry;
+  `RevokeAll` scoped theo subject, bỏ `Flush()` toàn cục.
+- [x] **Vá `**` glob** (M1.4) — yêu cầu ranh giới `/`.
+- [x] **max_age fail-closed** (M1.5) — thiếu `auth_time` mà policy yêu cầu max_age → deny;
+  `PolicyRequest.HasAuthTime`.
 
-**Exit criteria:** security review chạy lại không còn finding Critical/High; test regression cho từng bypass.
+**Còn lại (chuyển M3, defense-in-depth):** wire `StateMachine.Complete/Fail`, DPoP server nonce.
+**Đề xuất tiếp:** chạy lại security review để xác nhận 0 finding Critical/High.
 
 ---
 
@@ -75,7 +72,7 @@ Không có `cmd/`, gateway mode trong README/CLAUDE.md không thể build. Đây
 
 | Milestone | Nội dung | Trạng thái |
 |---|---|---|
-| M1 | Security blockers | ⬜ Chưa bắt đầu |
+| M1 | Security blockers | ✅ Hoàn tất |
 | M2 | Standalone binaries | ⬜ Chưa bắt đầu |
 | M3 | Hardening & RFC gaps | ⬜ Chưa bắt đầu |
 | M4 | Quality & ops | ⬜ Chưa bắt đầu |

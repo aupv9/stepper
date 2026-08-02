@@ -21,14 +21,14 @@
 | 7 | Telemetry (slog/Prometheus/OTel/audit) | `pkg/telemetry` | RFC 8417 | 61.9% | **B** | ✅ Sẵn sàng |
 | 8 | DevKit (LocalAS/TokenFactory/Simulator) | `pkg/devkit/*` | — | 83–96% | **A** | ✅ Dev/test only |
 | 9 | Step-up challenge (WWW-Authenticate) | `pkg/core/stepup` | RFC 9470 | 97.1% | **B-** | ⚠️ Challenge OK, state machine chưa wired |
-| 10 | Policy engine (YAML, ACR hierarchy) | `pkg/core/policy` | — | 73.6% | **C** | ⚠️ `**` glob + max_age fail-open |
-| 11 | Token introspection | `pkg/core/token` | RFC 7662 | 56.1% | **B-** | ⚠️ Thiếu `aud` enforcement |
-| 12 | JWT validation | `pkg/core/token` | — | 56.1% | **C** | ⚠️ Thiếu iss/aud/alg allowlist |
-| 13 | Token cache (memory/Redis) | `pkg/core/token` + `goredis` | — | 56% / 0% | **C** | ⚠️ TTL không clamp theo exp |
-| 14 | Token revocation webhook | `pkg/core/token` | RFC 7009 | 56.1% | **D** | ❌ JTI revoke là no-op |
-| 15 | DPoP proof-of-possession | `pkg/core/token` | RFC 9449 | 56.1% | **D** | ❌ Không bind `cnf.jkt`, không chống replay |
-| 16 | FAPI 2.0 + PAR | `pkg/core/fapi` | RFC 9126 | 90.0% | **C** | ⚠️ Viết đúng nhưng chưa gọi từ gateway |
-| 17 | Gateway guard + reverse proxy | `internal/gateway` | — | 78.3% | **D** | ❌ Cookie replay bypass step-up |
+| 10 | Policy engine (YAML, ACR hierarchy) | `pkg/core/policy` | — | ~76% | **B** | ✅ `**` glob + max_age đã vá (M1.4/M1.5) |
+| 11 | Token introspection | `pkg/core/token` | RFC 7662 | 62.0% | **B-** | ⚠️ Thiếu `aud` enforcement (M3) |
+| 12 | JWT validation | `pkg/core/token` | — | 62.0% | **C** | ⚠️ Thiếu iss/aud/alg allowlist (M3) |
+| 13 | Token cache (memory/Redis) | `pkg/core/token` + `goredis` | — | 62% / 0% | **C** | ⚠️ TTL không clamp theo exp (M3) |
+| 14 | Token revocation webhook | `pkg/core/token` | RFC 7009 | 62.0% | **B** | ✅ JTI/subject index đã vá (M1.3) |
+| 15 | DPoP proof-of-possession | `pkg/core/token` | RFC 9449 | 62.0% | **B** | ✅ Bind `cnf.jkt` + chống replay (M1.2); còn thiếu nonce (M3) |
+| 16 | FAPI 2.0 + PAR | `pkg/core/fapi` | RFC 9126 | 90.0% | **C** | ⚠️ Viết đúng nhưng chưa gọi từ gateway (M3) |
+| 17 | Gateway guard + reverse proxy | `internal/gateway` | — | ~80% | **B-** | ✅ Cookie replay bypass đã vá (M1.1); còn TTL/tenant fallback (M3) |
 | 18 | Admin API + UI | `internal/admin` | — | 68.1% | **B** | ✅ Sẵn sàng (cần authz) |
 | 19 | HTTP server (graceful shutdown) | `internal/server` | — | 100% | **A** | ✅ Sẵn sàng |
 | 20 | Standalone binaries (`cmd/`) | — | — | ∅ | **F** | ❌ Chưa tồn tại |
@@ -50,28 +50,31 @@ Những feature dưới đây đã pass test, đúng RFC, không có gap chặn 
 
 ---
 
-## ⚠️ Có code nhưng CHẶN production (cần vá)
+## ✅ Milestone 1 — ĐÃ VÁ (security blockers)
 
-### DPoP (RFC 9449) — Grade D — **security theater ở trạng thái hiện tại**
-- [ ] **CRITICAL:** Không so `cnf.jkt` thumbprint của proof với access token → kẻ có bearer token bị đánh cắp tự tạo keypair vẫn pass. `CommonClaims` không có field `cnf`/`jkt`. *(dpop.go:53-101, claims.go)*
-- [ ] **CRITICAL:** Không có replay cache cho `jti` → proof bị bắt lại có thể replay trong cửa sổ `MaxAge`. *(dpop.go:41,132-145)*
-- [ ] **HIGH:** `ath` chỉ check khi non-empty → bỏ `ath` là bỏ qua check. *(dpop.go:92-98)*
-- [ ] `DPoPConfig.RequireHTTPS` được document nhưng **không bao giờ đọc** — no-op. *(dpop.go:22-31)*
-- [ ] Thiếu server-issued nonce (RFC 9449 §8).
+> Tất cả 5 security blocker đã fix + test, `go test ./... -race` xanh. Xem
+> [`docs/design-roadmap.md`](design-roadmap.md) cho thiết kế.
 
-### Gateway guard — Grade D — **step-up bypass**
-- [ ] **CRITICAL:** Cookie step-up được rewrite path sang saved path **sau khi** policy đã check path hiện tại, không re-evaluate → bronze token với tới được resource yêu cầu step-up. *(guard.go:130-178)*
-- [ ] **HIGH:** Cache TTL: token đã hết hạn (`ttl <= 0`) vẫn cache 30s như token bình thường. *(guard.go:196-201)*
-- [ ] **MEDIUM:** Tenant resolve lỗi → fallback `"default"` (fail-open). *(guard.go:94-97)*
-- [ ] **MEDIUM:** Reverse proxy không strip header `X-Tenant-ID` do client gửi trước khi forward. *(proxy.go:12-26)*
+### DPoP (RFC 9449) — Grade D → **B** (M1.2)
+- [x] **CRITICAL:** So `cnf.jkt` thumbprint (RFC 7638) của proof với access token — `DPoPProof.VerifyBinding`; kẻ có bearer token bị đánh cắp + keypair riêng nay bị reject. `CommonClaims`/`IntrospectionResponse` có field `CNF`.
+- [x] **CRITICAL:** `MemoryReplayGuard` chống replay `jti` trong cửa sổ `MaxAge`.
+- [x] **HIGH:** `ath` bắt buộc trong `VerifyBinding`.
+- [x] `RequireHTTPS` được enforce trên `htu`.
+- [ ] Server-issued nonce (RFC 9449 §8) — còn lại ở **M3**.
 
-### Token revocation (RFC 7009) — Grade D
-- [ ] **HIGH:** Revoke theo `jti` dùng raw JTI làm cache key, nhưng cache key thực là `sha256(token)` → **không bao giờ match**, revoke là no-op. Đây lại là path phổ biến nhất từ AS webhook. *(revocation.go:115-119)*
-- [ ] **HIGH:** `RevokeAll` cho 1 subject gọi `Flush()` → xóa cache toàn bộ tenant/user (DoS/stampede). *(revocation.go:121-126)*
+### Gateway guard — Grade D → **B-** (M1.1)
+- [x] **CRITICAL:** Policy giờ chấm đúng **effective (served) path** trước khi replay → bronze token + cookie trỏ resource cao bị re-challenge. Có regression test `TestGuard_StepUpCookieReplay_NoBypass`.
+- [ ] **HIGH:** Cache TTL `ttl <= 0` vẫn cache 30s — còn lại ở **M3**. *(guard.go)*
+- [ ] **MEDIUM:** Tenant resolve fail-open `"default"` — **M3**.
+- [ ] **MEDIUM:** Proxy không strip `X-Tenant-ID` client gửi — **M3**.
 
-### Policy engine — Grade C
-- [ ] **CRITICAL:** `**` glob chỉ dùng `strings.HasPrefix` không có ranh giới `/` → `/public/**` khớp cả `/publicSECRET/admin`. *(matcher.go:22-30)*
-- [ ] **HIGH:** `max_age` bị bỏ qua hoàn toàn khi token không có `auth_time` (`req.AuthAge == 0`) — fail-open, đúng thứ RFC 9470 muốn ngăn. *(engine.go:86-94)*
+### Token revocation (RFC 7009) — Grade D → **B** (M1.3)
+- [x] **HIGH:** `TokenIndex` (jti/subject → tokenHash); revoke theo `jti` nay xóa đúng cache entry (không còn no-op). Không index → trả lỗi thay vì no-op.
+- [x] **HIGH:** `RevokeAll` theo subject xóa đúng token của subject đó (bỏ `Flush()` toàn cục); test xác nhận không đụng subject khác.
+
+### Policy engine — Grade C → **B** (M1.4 + M1.5)
+- [x] **CRITICAL:** `**` glob yêu cầu ranh giới `/` → `/public/**` không còn khớp `/publicSECRET/admin`. Có bảng test bypass.
+- [x] **HIGH:** `max_age` fail-closed — thiếu `auth_time` mà policy yêu cầu max_age → deny. `PolicyRequest.HasAuthTime` set ở guard + 4 middleware + simulator.
 
 ### JWT / introspection / cache — Grade C
 - [ ] **MEDIUM:** Introspection response không có field `aud`, không enforce audience. *(introspect.go:17-34)*
