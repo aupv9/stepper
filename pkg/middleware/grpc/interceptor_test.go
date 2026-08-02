@@ -27,10 +27,10 @@ type fakeProvider struct {
 func (f *fakeProvider) Introspect(_ context.Context, _ string) (*token.CommonClaims, error) {
 	return f.claims, f.err
 }
-func (f *fakeProvider) JWKS(_ context.Context) ([]byte, error)  { return nil, nil }
-func (f *fakeProvider) RefreshConfig(_ context.Context) error    { return nil }
-func (f *fakeProvider) Name() string                             { return "fake" }
-func (f *fakeProvider) Issuer() string                           { return "https://fake.as" }
+func (f *fakeProvider) JWKS(_ context.Context) ([]byte, error) { return nil, nil }
+func (f *fakeProvider) RefreshConfig(_ context.Context) error  { return nil }
+func (f *fakeProvider) Name() string                           { return "fake" }
+func (f *fakeProvider) Issuer() string                         { return "https://fake.as" }
 
 var _ providers.Provider = (*fakeProvider)(nil)
 

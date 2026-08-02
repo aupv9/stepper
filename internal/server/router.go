@@ -11,7 +11,7 @@ import (
 
 // RouterConfig holds dependencies for route setup.
 type RouterConfig struct {
-	Gateway     *gateway.Guard
+	Gateway      *gateway.Guard
 	AdminHandler *admin.Handler
 }
 

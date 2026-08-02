@@ -10,9 +10,9 @@ import (
 	echofwk "github.com/labstack/echo/v4"
 
 	"github.com/common-iam/iam/pkg/core/policy"
-	iamecho "github.com/common-iam/iam/pkg/middleware/echo"
 	"github.com/common-iam/iam/pkg/devkit/localas"
 	"github.com/common-iam/iam/pkg/devkit/tokenfactory"
+	iamecho "github.com/common-iam/iam/pkg/middleware/echo"
 	"github.com/common-iam/iam/pkg/providers/generic"
 )
 

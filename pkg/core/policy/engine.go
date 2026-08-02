@@ -58,8 +58,8 @@ func (e *Engine) matchesPolicy(p *Policy, req *PolicyRequest) bool {
 // check evaluates a matched policy against the token claims.
 func (e *Engine) check(p *Policy, req *PolicyRequest) *PolicyResult {
 	result := &PolicyResult{
-		MatchedPolicy: p,
-		RequiredACR:   p.RequireACR,
+		MatchedPolicy:  p,
+		RequiredACR:    p.RequireACR,
 		RequiredMaxAge: p.MaxAge,
 	}
 

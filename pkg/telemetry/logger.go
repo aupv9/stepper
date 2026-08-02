@@ -39,15 +39,15 @@ func LoggerFromContext(ctx context.Context) *slog.Logger {
 
 // IAMEvent is a structured log event for IAM operations.
 type IAMEvent struct {
-	Event     string // e.g. "token.validated", "stepup.challenge_issued"
-	TenantID  string
-	Subject   string
-	ACR       string
-	Resource  string
-	Method    string
-	Allowed   bool
-	Reason    string
-	TraceID   string
+	Event    string // e.g. "token.validated", "stepup.challenge_issued"
+	TenantID string
+	Subject  string
+	ACR      string
+	Resource string
+	Method   string
+	Allowed  bool
+	Reason   string
+	TraceID  string
 }
 
 // Log emits the IAMEvent as a structured slog record.

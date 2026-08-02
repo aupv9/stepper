@@ -38,6 +38,7 @@ type Guard struct {
 	webhookSecret string
 	cookieSecret  string
 	fapiCfg       *fapi.ValidationConfig
+	limiter       *rateLimiter
 }
 
 // GuardConfig holds Guard dependencies.
@@ -78,6 +79,13 @@ type GuardConfig struct {
 	// FAPI, when set, enforces the FAPI 2.0 Security Profile on every request
 	// after introspection (fapi.DefaultFAPI2Config() for strict compliance).
 	FAPI *fapi.ValidationConfig
+
+	// RateLimitRPS, when > 0, limits each client IP to this many requests per
+	// second (token bucket). Requests over the limit get 429.
+	RateLimitRPS float64
+
+	// RateLimitBurst is the bucket size (default: RateLimitRPS, minimum 1).
+	RateLimitBurst int
 }
 
 // NewGuard creates a ResourceServerGuard.
@@ -101,6 +109,9 @@ func NewGuard(cfg GuardConfig) *Guard {
 		cookieSecret:  cfg.CookieSecret,
 		fapiCfg:       cfg.FAPI,
 	}
+	if cfg.RateLimitRPS > 0 {
+		g.limiter = newRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst)
+	}
 	if cfg.EnableDPoP {
 		dpopCfg := token.DefaultDPoPConfig()
 		if cfg.DPoPNonceSecret != "" {
@@ -119,6 +130,13 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, span := telemetry.StartSpan(r.Context(), "gateway.Guard.ServeHTTP")
 	defer span.End()
 	r = r.WithContext(ctx)
+
+	// 0. Rate limiting (pre-auth, keyed by client IP).
+	if g.limiter != nil && !g.limiter.allow(clientKey(r)) {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
 
 	// 1. Resolve tenant — fail closed. Single-tenant deployments opt in to a
 	// default by appending tenant.NewStaticResolver to their resolver chain.

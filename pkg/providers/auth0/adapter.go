@@ -28,8 +28,8 @@ type Config struct {
 
 // Adapter wraps the generic OIDC adapter for Auth0.
 type Adapter struct {
-	inner    *generic.Adapter
-	cfg      Config
+	inner *generic.Adapter
+	cfg   Config
 }
 
 // New creates an Auth0 adapter. Call RefreshConfig before use.

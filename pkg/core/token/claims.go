@@ -32,12 +32,12 @@ type CommonClaims struct {
 	Confirmation *Confirmation `json:"cnf,omitempty"`
 
 	// Auth context (RFC 9470)
-	ACR string `json:"acr"` // Authentication Context Class Reference
+	ACR string   `json:"acr"` // Authentication Context Class Reference
 	AMR []string `json:"amr"` // Authentication Methods References
 
 	// Session
-	SessionID   string    `json:"sid"`
-	AuthTime    time.Time `json:"auth_time"` // when user authenticated (for max_age check)
+	SessionID string    `json:"sid"`
+	AuthTime  time.Time `json:"auth_time"` // when user authenticated (for max_age check)
 
 	// Identity
 	Email    string `json:"email"`

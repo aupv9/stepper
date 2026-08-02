@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/common-iam/iam/pkg/providers/generic"
 	"github.com/common-iam/iam/pkg/core/token"
+	"github.com/common-iam/iam/pkg/providers/generic"
 )
 
 // Config holds Keycloak-specific configuration.
@@ -50,8 +50,8 @@ func New(cfg Config) *Adapter {
 	return &Adapter{inner: inner, cfg: cfg}
 }
 
-func (a *Adapter) Name() string    { return "keycloak" }
-func (a *Adapter) Issuer() string  { return a.inner.Issuer() }
+func (a *Adapter) Name() string   { return "keycloak" }
+func (a *Adapter) Issuer() string { return a.inner.Issuer() }
 
 func (a *Adapter) RefreshConfig(ctx context.Context) error {
 	return a.inner.RefreshConfig(ctx)

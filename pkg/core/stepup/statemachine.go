@@ -16,7 +16,7 @@ import (
 
 const (
 	// CookieName is the cookie used to carry SavedRequest state across the re-auth redirect.
-	CookieName = "iam_stepup_state"
+	CookieName   = "iam_stepup_state"
 	cookieMaxAge = 600 // 10 minutes
 )
 
@@ -24,10 +24,10 @@ const (
 type State int
 
 const (
-	StateIdle       State = iota // No challenge in progress
-	StateChallenge               // Challenge issued, waiting for re-auth
-	StateCompleted               // Re-authentication successful
-	StateFailed                  // Re-authentication failed or timed out
+	StateIdle      State = iota // No challenge in progress
+	StateChallenge              // Challenge issued, waiting for re-auth
+	StateCompleted              // Re-authentication successful
+	StateFailed                 // Re-authentication failed or timed out
 )
 
 func (s State) String() string {
@@ -53,13 +53,13 @@ const stepUpStateKey contextKey = iota
 // SavedRequest captures the original request before the step-up challenge,
 // so it can be replayed after successful re-authentication.
 type SavedRequest struct {
-	Method   string
-	Path     string
-	Query    string
-	StateID  string    // random opaque value for CSRF protection
-	SavedAt  time.Time
-	ACRHint  string    // acr_values that triggered this challenge
-	MaxAge   int
+	Method  string
+	Path    string
+	Query   string
+	StateID string // random opaque value for CSRF protection
+	SavedAt time.Time
+	ACRHint string // acr_values that triggered this challenge
+	MaxAge  int
 }
 
 // Encode serializes the SavedRequest to a base64 string (for state param / cookie).
