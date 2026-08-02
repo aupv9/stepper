@@ -16,6 +16,7 @@ type Request struct {
 	AMR         []string
 	Scopes      []string
 	AuthAge     time.Duration
+	HasAuthTime bool // whether the simulated token carries an auth_time claim
 }
 
 // Result is the simulation outcome.
@@ -46,6 +47,7 @@ func (s *Simulator) Simulate(req Request) (*Result, error) {
 		TokenAMR:    req.AMR,
 		TokenScopes: req.Scopes,
 		AuthAge:     req.AuthAge,
+		HasAuthTime: req.HasAuthTime || req.AuthAge > 0,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("policy evaluation: %w", err)

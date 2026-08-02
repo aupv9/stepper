@@ -105,6 +105,7 @@ func authenticate(ctx context.Context, fullMethod string, cfg Config) (context.C
 			TokenAMR:             claims.AMR,
 			TokenScopes:          claims.Scopes,
 			AuthAge:              claims.AuthAge(),
+			HasAuthTime:          !claims.AuthTime.IsZero(),
 			AuthorizationDetails: claims.AuthorizationDetails,
 		})
 		if pErr != nil {

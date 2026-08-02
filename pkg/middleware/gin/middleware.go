@@ -53,6 +53,7 @@ func Middleware(cfg Config) gin.HandlerFunc {
 				TokenAMR:             claims.AMR,
 				TokenScopes:          claims.Scopes,
 				AuthAge:              claims.AuthAge(),
+				HasAuthTime:          !claims.AuthTime.IsZero(),
 				AuthorizationDetails: claims.AuthorizationDetails,
 			})
 			if err != nil {

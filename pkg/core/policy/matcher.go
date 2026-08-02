@@ -19,14 +19,16 @@ func MatchResource(pattern, requestPath string) bool {
 		return pattern == requestPath
 	}
 
-	// Handle ** (match any number of path segments)
+	// Handle ** (match any number of path segments).
+	// The prefix must align on a path-segment boundary: "/public/**" matches
+	// "/public" and "/public/x/y" but NOT "/publicSECRET/admin".
 	if strings.Contains(pattern, "**") {
 		prefix := strings.SplitN(pattern, "**", 2)[0]
 		prefix = strings.TrimRight(prefix, "/")
 		if prefix == "" {
 			return true // ** matches everything
 		}
-		return strings.HasPrefix(requestPath, prefix)
+		return requestPath == prefix || strings.HasPrefix(requestPath, prefix+"/")
 	}
 
 	// Use path.Match for single-level wildcards

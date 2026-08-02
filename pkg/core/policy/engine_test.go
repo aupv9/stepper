@@ -83,21 +83,28 @@ func TestEngine_MaxAge(t *testing.T) {
 	e := New(cfg)
 
 	t.Run("within max_age", func(t *testing.T) {
-		result, _ := e.Evaluate(&PolicyRequest{Method: "GET", Path: "/secure", AuthAge: 30 * time.Second})
+		result, _ := e.Evaluate(&PolicyRequest{Method: "GET", Path: "/secure", AuthAge: 30 * time.Second, HasAuthTime: true})
 		if !result.Allowed {
 			t.Errorf("expected allowed, got: %s", result.Reason)
 		}
 	})
 	t.Run("exceeds max_age", func(t *testing.T) {
-		result, _ := e.Evaluate(&PolicyRequest{Method: "GET", Path: "/secure", AuthAge: 90 * time.Second})
+		result, _ := e.Evaluate(&PolicyRequest{Method: "GET", Path: "/secure", AuthAge: 90 * time.Second, HasAuthTime: true})
 		if result.Allowed {
 			t.Error("expected denial when auth_age > max_age")
 		}
 	})
-	t.Run("zero auth_age skips check", func(t *testing.T) {
-		result, _ := e.Evaluate(&PolicyRequest{Method: "GET", Path: "/secure", AuthAge: 0})
+	t.Run("fresh auth (auth_time present, age ~0) is allowed", func(t *testing.T) {
+		result, _ := e.Evaluate(&PolicyRequest{Method: "GET", Path: "/secure", AuthAge: 0, HasAuthTime: true})
 		if !result.Allowed {
-			t.Errorf("zero AuthAge should skip max_age check, got: %s", result.Reason)
+			t.Errorf("fresh auth should be allowed, got: %s", result.Reason)
+		}
+	})
+	t.Run("missing auth_time fails closed", func(t *testing.T) {
+		// No auth_time claim on the token: cannot prove freshness, must deny.
+		result, _ := e.Evaluate(&PolicyRequest{Method: "GET", Path: "/secure", AuthAge: 0, HasAuthTime: false})
+		if result.Allowed {
+			t.Error("expected denial when max_age required but auth_time is absent")
 		}
 	})
 }

@@ -16,10 +16,10 @@ const claimsKey contextKey = iota
 
 // Config configures the IAM middleware.
 type Config struct {
-	Provider       providers.Provider
-	PolicyEngine   *policy.Engine
-	Realm          string
-	EnableDPoP     bool
+	Provider     providers.Provider
+	PolicyEngine *policy.Engine
+	Realm        string
+	EnableDPoP   bool
 }
 
 // Middleware returns a standard net/http middleware that:
@@ -74,6 +74,7 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 					TokenAMR:             claims.AMR,
 					TokenScopes:          claims.Scopes,
 					AuthAge:              claims.AuthAge(),
+					HasAuthTime:          !claims.AuthTime.IsZero(),
 					AuthorizationDetails: claims.AuthorizationDetails,
 				})
 				if err != nil {

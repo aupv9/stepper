@@ -508,3 +508,84 @@ func TestGuard_StepUpCookieReplay(t *testing.T) {
 		t.Errorf("upstream received path %q, want %q", upstreamPath, "/original")
 	}
 }
+
+// TestGuard_StepUpCookieReplay_NoBypass is the security regression for the
+// step-up cookie replay bypass: a low-assurance (bronze) token that only
+// satisfies the open /callback policy must NOT reach the silver-gated
+// /original resource just by carrying the saved-request cookie. Policy is
+// evaluated against the effective (served) path, so the bronze token is
+// re-challenged instead of forwarded.
+func TestGuard_StepUpCookieReplay_NoBypass(t *testing.T) {
+	as, provider := setupAS(t)
+
+	pCfg := &policy.Config{
+		ACRLevels: []string{"urn:mace:incommon:iap:bronze", "urn:mace:incommon:iap:silver"},
+		Policies: []policy.Policy{
+			{
+				Name:       "need-silver-for-original",
+				Resources:  []string{"/original"},
+				RequireACR: "urn:mace:incommon:iap:silver",
+				Enabled:    true,
+			},
+			{
+				Name:       "allow-callback",
+				Resources:  []string{"/callback"},
+				RequireACR: "urn:mace:incommon:iap:bronze",
+				Enabled:    true,
+			},
+		},
+	}
+
+	var upstreamHit bool
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHit = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, srv := buildGuard(t, provider, gateway.GuardConfig{
+		PolicyEngine: policy.New(pCfg),
+		CookieSecret: "test-replay-secret",
+		Upstream:     upstream,
+	})
+
+	bronzeToken, err := as.IssueToken(tokenfactory.TokenOptions{
+		Subject:   "mallory",
+		ACR:       "urn:mace:incommon:iap:bronze",
+		Scopes:    []string{"openid"},
+		ExpiresIn: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("IssueToken (bronze): %v", err)
+	}
+
+	// Step 1: hit /original with bronze → 401 + cookie saving /original.
+	req1, _ := http.NewRequest(http.MethodGet, srv.URL+"/original", nil)
+	req1.Header.Set("Authorization", "Bearer "+bronzeToken)
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if resp1.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("first request: expected 401, got %d", resp1.StatusCode)
+	}
+
+	// Step 2: attacker replays the /original cookie on the open /callback path,
+	// still holding only the bronze token.
+	req2, _ := http.NewRequest(http.MethodGet, srv.URL+"/callback", nil)
+	req2.Header.Set("Authorization", "Bearer "+bronzeToken)
+	for _, c := range resp1.Cookies() {
+		req2.AddCookie(c)
+	}
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+
+	// Must be re-challenged, NOT served the silver-gated resource.
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Errorf("bypass: expected 401 for bronze token on silver resource, got %d", resp2.StatusCode)
+	}
+	if upstreamHit {
+		t.Error("bypass: upstream was reached with a bronze token for the silver-gated /original")
+	}
+}

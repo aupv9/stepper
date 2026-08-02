@@ -43,6 +43,7 @@ type PolicyRequest struct {
 	TokenAMR    []string
 	TokenScopes []string
 	AuthAge     time.Duration // how long ago the user authenticated
+	HasAuthTime bool          // whether the token actually carried an auth_time claim
 
 	// AuthorizationDetails carries RFC 9396 details extracted from the token.
 	AuthorizationDetails []rar.AuthorizationDetail

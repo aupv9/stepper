@@ -83,8 +83,15 @@ func (e *Engine) check(p *Policy, req *PolicyRequest) *PolicyResult {
 		}
 	}
 
-	// Check max_age (auth time freshness)
-	if p.MaxAge > 0 && req.AuthAge > 0 {
+	// Check max_age (auth time freshness). Fail closed: when a policy requires a
+	// max_age but the token carries no auth_time claim, we cannot prove freshness,
+	// so the request is denied (RFC 9470 step-up semantics) rather than skipped.
+	if p.MaxAge > 0 {
+		if !req.HasAuthTime {
+			result.Allowed = false
+			result.Reason = fmt.Sprintf("authentication time unknown; policy requires max_age %ds", p.MaxAge)
+			return result
+		}
 		maxAge := time.Duration(p.MaxAge) * time.Second
 		if req.AuthAge > maxAge {
 			result.Allowed = false

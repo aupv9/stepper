@@ -127,52 +127,67 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	telemetry.SpanFromToken(span, claims.Subject, claims.ACR, tenantID)
 
-	// 5. Policy evaluation
+	// 5. Determine the *effective* request (the one we will actually serve).
+	// Step-up replay: when the client returns with a higher-assurance token and a
+	// signed cookie referencing the originally-denied resource, we intend to forward
+	// to that saved path. Resolve it up-front so policy is evaluated against the path
+	// we will serve — never evaluate one path and forward another (step-up bypass).
+	effMethod, effPath, effQuery := r.Method, r.URL.Path, r.URL.RawQuery
+	var saved *stepup.SavedRequest
+	if g.cookieSecret != "" {
+		if s, cookieErr := stepup.ReadStateCookie(r, g.cookieSecret); cookieErr == nil && s != nil && s.Path != "" {
+			saved = s
+			effMethod, effPath, effQuery = s.Method, s.Path, s.Query
+		}
+	}
+
+	// 6. Policy evaluation — always against the effective (served) path.
 	if g.policyEngine != nil {
 		result, evalErr := g.policyEngine.Evaluate(&policy.PolicyRequest{
-			Method:      r.Method,
-			Path:        r.URL.Path,
-			TokenACR:    claims.ACR,
-			TokenAMR:    claims.AMR,
-			TokenScopes: claims.Scopes,
-			AuthAge:     claims.AuthAge(),
+			Method:               effMethod,
+			Path:                 effPath,
+			TokenACR:             claims.ACR,
+			TokenAMR:             claims.AMR,
+			TokenScopes:          claims.Scopes,
+			AuthAge:              claims.AuthAge(),
+			HasAuthTime:          !claims.AuthTime.IsZero(),
+			AuthorizationDetails: claims.AuthorizationDetails,
 		})
 		if evalErr != nil {
 			http.Error(w, "policy evaluation error", http.StatusInternalServerError)
 			return
 		}
 		if !result.Allowed {
+			// The current token does not satisfy the effective path's policy.
+			// Re-challenge for that path (mark the flow failed for the state machine).
 			g.handleDenial(ctx, w, r, claims.Subject, tenantID, result)
 			return
 		}
 
 		if g.audit != nil {
-			g.audit.EmitPolicyDecision(ctx, claims.Subject, tenantID, r.URL.Path, r.Method, "", "", true)
+			g.audit.EmitPolicyDecision(ctx, claims.Subject, tenantID, effPath, effMethod, "", "", true)
 		}
 	}
 
-	// Step-up cookie replay: if the client returned with a higher-assurance token
-	// from a different path (e.g., /callback), forward to the original saved resource.
-	if g.cookieSecret != "" {
-		if saved, cookieErr := stepup.ReadStateCookie(r, g.cookieSecret); cookieErr == nil && saved != nil {
-			if saved.Path != "" && saved.Path != r.URL.Path {
-				r = r.Clone(r.Context())
-				r.URL.Path = saved.Path
-				r.URL.RawQuery = saved.Query
-				r.RequestURI = saved.Path
-				if saved.Query != "" {
-					r.RequestURI += "?" + saved.Query
-				}
-			}
+	// 7. Policy passed for the effective path. If this was a replay, rewrite the
+	// request to the saved resource now (safe: policy above already covered it).
+	if saved != nil {
+		r = r.Clone(r.Context())
+		r.Method = effMethod
+		r.URL.Path = effPath
+		r.URL.RawQuery = effQuery
+		r.RequestURI = effPath
+		if effQuery != "" {
+			r.RequestURI += "?" + effQuery
 		}
 	}
 
-	// 6. Clear any pending step-up cookie now that auth succeeded.
+	// 8. Clear any pending step-up cookie now that auth succeeded.
 	if g.cookieSecret != "" {
 		stepup.ClearStateCookie(w)
 	}
 
-	// 7. Attach tenant + claims to context, pass to next handler.
+	// 9. Attach tenant + claims to context, pass to next handler.
 	ctx = tenant.WithTenantID(ctx, tenantID)
 	g.next.ServeHTTP(w, r.WithContext(ctx))
 }
