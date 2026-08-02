@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -59,7 +60,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) checkBearer(r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	token, ok := strings.CutPrefix(auth, "Bearer ")
-	return ok && token == h.adminToken
+	return ok && subtle.ConstantTimeCompare([]byte(token), []byte(h.adminToken)) == 1
 }
 
 func (h *Handler) routes() {

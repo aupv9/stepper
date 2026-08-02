@@ -357,6 +357,75 @@ func TestGuard_CookieOnStepUpChallenge(t *testing.T) {
 	}
 }
 
+// stubProvider is a providers.Provider whose introspection response omits iss
+// (legal per RFC 7662 §2.2) while still declaring a discovery issuer.
+type stubProvider struct {
+	issuer string
+	claims *token.CommonClaims
+}
+
+func (s *stubProvider) Introspect(context.Context, string) (*token.CommonClaims, error) {
+	return s.claims, nil
+}
+func (s *stubProvider) JWKS(context.Context) ([]byte, error) { return []byte(`{"keys":[]}`), nil }
+func (s *stubProvider) RefreshConfig(context.Context) error  { return nil }
+func (s *stubProvider) Name() string                         { return "stub" }
+func (s *stubProvider) Issuer() string                       { return s.issuer }
+
+// TestGuard_IssuerBinding_MissingIss_FailsClosed: when the provider declares an
+// issuer but the introspection response omits iss, the token cannot be bound
+// to the tenant and must be rejected — not silently accepted.
+func TestGuard_IssuerBinding_MissingIss_FailsClosed(t *testing.T) {
+	provider := &stubProvider{
+		issuer: "https://as.acme.example",
+		claims: &token.CommonClaims{
+			Active:    true,
+			Subject:   "mallory",
+			Issuer:    "", // AS omitted iss
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}
+
+	reg := tenant.NewRegistry()
+	reg.Register("default", provider)
+
+	pCfg := &policy.Config{
+		Policies: []policy.Policy{{Name: "open", Resources: []string{"/**"}, Enabled: true}},
+	}
+
+	guard := gateway.NewGuard(gateway.GuardConfig{
+		Registry:     reg,
+		Resolver:     tenant.NewStaticResolver("default"),
+		PolicyEngine: policy.New(pCfg),
+		Upstream: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}),
+		Realm: "Test",
+	})
+	srv := httptest.NewServer(guard)
+	t.Cleanup(srv.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/resource", nil)
+	req.Header.Set("Authorization", "Bearer whatever")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 when introspection omits iss, got %d", resp.StatusCode)
+	}
+
+	// Same setup but with matching iss must pass.
+	provider.claims.Issuer = "https://as.acme.example"
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request 2: %v", err)
+	}
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 with matching iss, got %d", resp2.StatusCode)
+	}
+}
+
 // TestGuard_MultiTenant_TokenIsolation verifies that a token issued by one tenant's AS
 // is rejected when presented to a guard routing to a different tenant's AS.
 func TestGuard_MultiTenant_TokenIsolation(t *testing.T) {

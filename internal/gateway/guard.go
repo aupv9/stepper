@@ -187,8 +187,15 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 4a. Cross-tenant binding: the token's issuer must match the resolved
 	// tenant's provider. Otherwise a valid token from tenant A could be
 	// presented under tenant B's header (with B's AS confirming nothing).
-	if iss := provider.Issuer(); iss != "" && claims.Issuer != "" && claims.Issuer != iss {
-		g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "token issuer does not match tenant provider", "", 0)
+	// Fail closed: iss is OPTIONAL in RFC 7662 responses, but when the
+	// provider declares an issuer, an introspection response without one
+	// cannot prove the token belongs to this tenant — reject it.
+	if iss := provider.Issuer(); iss != "" && claims.Issuer != iss {
+		reason := "token issuer does not match tenant provider"
+		if claims.Issuer == "" {
+			reason = "introspection response missing iss; cannot bind token to tenant"
+		}
+		g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, reason, "", 0)
 		return
 	}
 
