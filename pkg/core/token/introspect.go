@@ -29,6 +29,9 @@ type IntrospectionResponse struct {
 	TokenType string   `json:"token_type"`
 	JTI       string   `json:"jti"`
 
+	// CNF is the RFC 7800 confirmation claim (cnf.jkt for DPoP binding).
+	CNF *Confirmation `json:"cnf,omitempty"`
+
 	// AuthorizationDetails carries RFC 9396 authorization_details when present.
 	AuthorizationDetails []rar.AuthorizationDetail `json:"authorization_details,omitempty"`
 }
@@ -109,6 +112,7 @@ func introToCommonClaims(r *IntrospectionResponse) *CommonClaims {
 		AMR:      r.AMR,
 		Username: r.Username,
 		JTI:      r.JTI,
+		CNF:      r.CNF,
 	}
 	if r.Exp > 0 {
 		c.ExpiresAt = time.Unix(r.Exp, 0)

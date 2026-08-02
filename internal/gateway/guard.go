@@ -26,9 +26,10 @@ type Guard struct {
 	sm            *stepup.StateMachine
 	audit         *telemetry.AuditLogger
 	metrics       *telemetry.Metrics
-	next          http.Handler     // upstream handler (proxy or direct)
-	cache         token.Cache      // optional; nil = no caching
-	index         token.TokenIndex // optional; jti/subject -> cache key, for revocation
+	next          http.Handler      // upstream handler (proxy or direct)
+	cache         token.Cache       // optional; nil = no caching
+	index         token.TokenIndex  // optional; jti/subject -> cache key, for revocation
+	replay        token.ReplayGuard // DPoP jti replay guard (built when EnableDPoP)
 	enableDPoP    bool
 	webhookSecret string
 	cookieSecret  string
@@ -76,6 +77,11 @@ func NewGuard(cfg GuardConfig) *Guard {
 		index = token.NewMemoryTokenIndex()
 	}
 
+	var replay token.ReplayGuard
+	if cfg.EnableDPoP {
+		replay = token.NewMemoryReplayGuard()
+	}
+
 	return &Guard{
 		registry:      cfg.Registry,
 		resolver:      cfg.Resolver,
@@ -87,6 +93,7 @@ func NewGuard(cfg GuardConfig) *Guard {
 		next:          cfg.Upstream,
 		cache:         cfg.Cache,
 		index:         index,
+		replay:        replay,
 		enableDPoP:    cfg.EnableDPoP,
 		webhookSecret: cfg.WebhookSecret,
 		cookieSecret:  cfg.CookieSecret,
@@ -119,12 +126,19 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3a. DPoP proof-of-possession (RFC 9449) — only when explicitly enabled
+	// 3a. DPoP proof-of-possession (RFC 9449) — only when explicitly enabled.
+	// Phase 1 (here): verify the proof is self-consistent (signature, htm, htu,
+	// freshness). Phase 2 (after introspection) binds it to the token's cnf.jkt
+	// and checks for replay — that needs the token's claims.
+	dpopCfg := token.DefaultDPoPConfig()
+	var dpopProof *token.DPoPProof
 	if g.enableDPoP {
-		if _, dpopErr := token.ValidateDPoP(r, rawToken, token.DefaultDPoPConfig()); dpopErr != nil {
+		p, dpopErr := token.ValidateDPoP(r, rawToken, dpopCfg)
+		if dpopErr != nil {
 			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "DPoP validation failed: "+dpopErr.Error(), "", 0)
 			return
 		}
+		dpopProof = p
 	}
 
 	// 4. Introspect token (cache-first when a cache is configured)
@@ -132,6 +146,25 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !claims.Active {
 		g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "token inactive or validation failed", "", 0)
 		return
+	}
+
+	// 4a. DPoP phase 2: reject replayed proofs, then bind the proof key to the
+	// access token's cnf.jkt. This is what makes DPoP a real sender-constraint.
+	if g.enableDPoP {
+		if dpopProof.JTI == "" {
+			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "DPoP proof missing jti", "", 0)
+			return
+		}
+		if g.replay != nil {
+			if seen, _ := g.replay.CheckAndSet(ctx, dpopProof.JTI, dpopCfg.MaxAge); seen {
+				g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "DPoP proof replayed", "", 0)
+				return
+			}
+		}
+		if bindErr := dpopProof.VerifyBinding(rawToken, claims.CNF); bindErr != nil {
+			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "DPoP binding failed: "+bindErr.Error(), "", 0)
+			return
+		}
 	}
 
 	telemetry.SpanFromToken(span, claims.Subject, claims.ACR, tenantID)

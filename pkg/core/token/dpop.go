@@ -5,6 +5,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -80,6 +82,11 @@ func ValidateDPoP(r *http.Request, accessToken string, cfg DPoPConfig) (*DPoPPro
 		}
 	}
 
+	// Enforce HTTPS on the htu when configured (RFC 9449 §4.3 recommends TLS).
+	if cfg.RequireHTTPS && !strings.HasPrefix(strings.ToLower(proof.HTU), "https://") {
+		return nil, fmt.Errorf("DPoP htu must use https")
+	}
+
 	// Validate freshness
 	age := time.Since(proof.IAT)
 	if cfg.MaxAge > 0 && age > cfg.MaxAge {
@@ -89,7 +96,9 @@ func ValidateDPoP(r *http.Request, accessToken string, cfg DPoPConfig) (*DPoPPro
 		return nil, fmt.Errorf("DPoP proof issued in the future")
 	}
 
-	// Validate ATH (access token hash) if present
+	// Validate ATH (access token hash) if present. Self-consistency only —
+	// mandatory ath enforcement + cnf.jkt binding happen in VerifyBinding once
+	// the access token's claims are known.
 	if proof.ATH != "" {
 		expectedATH := hashTokenForDPoP(accessToken)
 		if proof.ATH != expectedATH {
@@ -98,6 +107,64 @@ func ValidateDPoP(r *http.Request, accessToken string, cfg DPoPConfig) (*DPoPPro
 	}
 
 	return proof, nil
+}
+
+// VerifyBinding completes DPoP proof-of-possession (RFC 9449 §4.3, §7): it
+// requires the ath claim, checks it matches the access token, and—crucially—
+// verifies the proof's public-key thumbprint equals the access token's
+// cnf.jkt. Without this last step DPoP provides no sender-constraint: any
+// holder of a stolen bearer token could attach a fresh keypair and pass.
+//
+// Call this AFTER introspection, when the token's cnf is known.
+func (p *DPoPProof) VerifyBinding(accessToken string, cnf *Confirmation) error {
+	if p.ATH == "" {
+		return ErrDPoPMissingATH
+	}
+	if subtle.ConstantTimeCompare([]byte(p.ATH), []byte(hashTokenForDPoP(accessToken))) != 1 {
+		return ErrDPoPBindingMismatch
+	}
+	if cnf == nil || cnf.JKT == "" {
+		return ErrDPoPNoCnf
+	}
+	thumb, err := JWKThumbprint(p.JWK)
+	if err != nil {
+		return err
+	}
+	if subtle.ConstantTimeCompare([]byte(thumb), []byte(cnf.JKT)) != 1 {
+		return ErrDPoPBindingMismatch
+	}
+	return nil
+}
+
+// JWKThumbprint computes the RFC 7638 SHA-256 thumbprint of a JWK:
+// base64url(SHA-256(canonical-json)), where the canonical JSON contains only
+// the key's required members in lexicographic order with no whitespace.
+func JWKThumbprint(jwk map[string]interface{}) (string, error) {
+	kty, _ := jwk["kty"].(string)
+	var canonical string
+	switch kty {
+	case "EC":
+		crv, _ := jwk["crv"].(string)
+		x, _ := jwk["x"].(string)
+		y, _ := jwk["y"].(string)
+		if crv == "" || x == "" || y == "" {
+			return "", fmt.Errorf("EC JWK missing crv/x/y for thumbprint")
+		}
+		// Required members, lexicographic: crv, kty, x, y.
+		canonical = fmt.Sprintf(`{"crv":%q,"kty":"EC","x":%q,"y":%q}`, crv, x, y)
+	case "RSA":
+		e, _ := jwk["e"].(string)
+		n, _ := jwk["n"].(string)
+		if e == "" || n == "" {
+			return "", fmt.Errorf("RSA JWK missing e/n for thumbprint")
+		}
+		// Required members, lexicographic: e, kty, n.
+		canonical = fmt.Sprintf(`{"e":%q,"kty":"RSA","n":%q}`, e, n)
+	default:
+		return "", fmt.Errorf("unsupported JWK kty for thumbprint: %q", kty)
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
 
 // parseDPoPJWT parses the DPoP proof JWT header and payload.

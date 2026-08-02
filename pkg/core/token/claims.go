@@ -13,7 +13,16 @@ var (
 	ErrTokenExpired        = errors.New("token has expired")
 	ErrTokenInactive       = errors.New("token is not active")
 	ErrDPoPBindingMismatch = errors.New("dpop proof does not match token binding")
+	ErrDPoPMissingATH      = errors.New("dpop proof missing required ath claim")
+	ErrDPoPNoCnf           = errors.New("access token has no cnf.jkt confirmation to bind against")
+	ErrDPoPReplay          = errors.New("dpop proof jti has already been seen (replay)")
 )
+
+// Confirmation is the RFC 7800 cnf claim. For DPoP (RFC 9449) it carries the
+// JWK SHA-256 thumbprint (RFC 7638) that the presented proof key must match.
+type Confirmation struct {
+	JKT string `json:"jkt"`
+}
 
 // CommonClaims is the normalized representation of JWT/introspection claims
 // across all providers (Keycloak, Auth0, generic OIDC).
@@ -36,6 +45,10 @@ type CommonClaims struct {
 	// JTI is the token's unique ID (RFC 7662). Used to build the revocation
 	// index so a webhook that only knows the jti can invalidate the cache entry.
 	JTI string `json:"jti,omitempty"`
+
+	// CNF is the RFC 7800 confirmation claim. When present, cnf.jkt binds the
+	// token to a DPoP key (RFC 9449) and must match the presented proof.
+	CNF *Confirmation `json:"cnf,omitempty"`
 
 	// Identity
 	Email    string `json:"email"`
