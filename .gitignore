@@ -4,10 +4,10 @@
 *.dll
 *.so
 *.dylib
-iam-service
-iam-cli
-iam-service.exe
-iam-cli.exe
+/iam-service
+/iam-cli
+/iam-service.exe
+/iam-cli.exe
 
 # Build output
 /bin/

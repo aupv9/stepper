@@ -28,18 +28,21 @@ Nguyên tắc ưu tiên: **security-blocking trước, wiring sau, tính năng m
 
 ---
 
-## 🟠 Milestone 2 — Chạy được standalone
+## ✅ Milestone 2 — Chạy được standalone (HOÀN TẤT)
 
-Không có `cmd/`, gateway mode trong README/CLAUDE.md không thể build. Đây là gap "chức năng" lớn nhất.
+Trước đây không có `cmd/`, gateway mode trong README/CLAUDE.md không build được.
 
-- [ ] **`cmd/iam-service/main.go`** — wiring đầy đủ:
-  - Đọc env (`IAM_ADDR`, `IAM_REALM`, `IAM_POLICY_FILE`, `IAM_UPSTREAM_URL`, `IAM_OIDC_*`, `IAM_LOG_FORMAT`).
-  - Dev mode tự khởi động LocalAS khi thiếu `IAM_OIDC_DISCOVERY_URL` (đúng như README mô tả).
-  - Nối guard + proxy + admin + telemetry + graceful server.
-- [ ] **`cmd/iam-cli/main.go`** — CLI cho policy-check, token-factory, introspect.
-- [ ] Cập nhật `make service` / `make cli` chạy được; smoke test trong `tests/integration`.
+- [x] **`cmd/iam-service`** — wiring đầy đủ: đọc env (`config.go`), dev mode tự khởi động LocalAS +
+  in demo token khi thiếu `IAM_OIDC_DISCOVERY_URL`, nối guard + proxy/echo + admin + telemetry +
+  graceful shutdown (SIGINT/SIGTERM).
+- [x] **`cmd/iam-cli`** — `policy-check`, `token issue`, `introspect`, `version`.
+- [x] `make service` / `make cli` / `make binaries` chạy được (đổi sang dạng package vì service có nhiều file).
+- [x] Smoke-test thủ công: `./iam-service` boot dev mode; bronze token được phép ở tier của nó và bị
+  step-up challenge đúng RFC 9470 (`insufficient_user_authentication`, `acr_values=silver`, `max_age=300`)
+  khi POST `/api/payments/**`.
 
-**Exit criteria:** `go build ./cmd/...` pass; `./iam-service` boot ở dev mode; Quickstart trong README reproduce được.
+**Đã đạt:** `go build ./cmd/...` pass; `./iam-service` boot dev mode; Quickstart README reproduce được.
+**Lưu ý:** sửa được một bug `.gitignore` (`iam-service`/`iam-cli` không anchor → ignore luôn thư mục `cmd/`).
 
 ---
 
@@ -73,7 +76,7 @@ Không có `cmd/`, gateway mode trong README/CLAUDE.md không thể build. Đây
 | Milestone | Nội dung | Trạng thái |
 |---|---|---|
 | M1 | Security blockers | ✅ Hoàn tất |
-| M2 | Standalone binaries | ⬜ Chưa bắt đầu |
+| M2 | Standalone binaries | ✅ Hoàn tất |
 | M3 | Hardening & RFC gaps | ⬜ Chưa bắt đầu |
 | M4 | Quality & ops | ⬜ Chưa bắt đầu |
 

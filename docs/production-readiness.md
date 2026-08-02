@@ -31,7 +31,7 @@
 | 17 | Gateway guard + reverse proxy | `internal/gateway` | — | ~80% | **B-** | ✅ Cookie replay bypass đã vá (M1.1); còn TTL/tenant fallback (M3) |
 | 18 | Admin API + UI | `internal/admin` | — | 68.1% | **B** | ✅ Sẵn sàng (cần authz) |
 | 19 | HTTP server (graceful shutdown) | `internal/server` | — | 100% | **A** | ✅ Sẵn sàng |
-| 20 | Standalone binaries (`cmd/`) | — | — | ∅ | **F** | ❌ Chưa tồn tại |
+| 20 | Standalone binaries (`cmd/`) | `cmd/iam-{service,cli}` | — | config test | **B** | ✅ Đã tạo + wiring env (M2) |
 
 ---
 
@@ -94,9 +94,10 @@ Những feature dưới đây đã pass test, đúng RFC, không có gap chặn 
 
 ---
 
-## ❌ Chưa tồn tại
+## Còn lại
 
-- [ ] **`cmd/iam-service/main.go`** — entrypoint gateway standalone. README Quickstart + `make service` đang trỏ tới đây.
-- [ ] **`cmd/iam-cli/main.go`** — CLI. `make cli` đang fail.
-- [ ] **Env-var wiring** (`IAM_ADDR`, `IAM_POLICY_FILE`, `IAM_UPSTREAM_URL`, ...) — cả bảng env trong CLAUDE.md/README chưa được đọc ở đâu trong code (chỉ có logic ở `internal/`, thiếu `main.go` nối vào).
-- [ ] Redis adapter (`goredis`) coverage 0% — chỉ có mock test, chưa có integration test với Redis thật.
+- [x] **`cmd/iam-service`** (M2) — entrypoint gateway standalone; dev mode tự khởi động LocalAS + in demo token; graceful shutdown. Smoke-test: bronze token được phép ở tier của nó, bị step-up challenge đúng RFC 9470 khi POST payments.
+- [x] **`cmd/iam-cli`** (M2) — `policy-check`, `token issue`, `introspect`, `version`.
+- [x] **Env-var wiring** (M2) — `cmd/iam-service/config.go` đọc `IAM_ADDR`, `IAM_REALM`, `IAM_POLICY_FILE`, `IAM_UPSTREAM_URL`, `IAM_OIDC_*`, `IAM_LOG_FORMAT`, `IAM_COOKIE_SECRET`, `IAM_WEBHOOK_SECRET`, `IAM_ADMIN_TOKEN`, `IAM_ENABLE_DPOP`.
+- [ ] Redis adapter (`goredis`) coverage 0% — chỉ có mock test, chưa có integration test với Redis thật (**M4**).
+- [ ] Public-path policy không thể đạt tới nếu không có token (guard extract token trước policy) — cân nhắc ở **M3**.
