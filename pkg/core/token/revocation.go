@@ -35,20 +35,30 @@ type RevocationEvent struct {
 // and invalidates the corresponding cache entries.
 type RevocationHandler struct {
 	cache  Cache
+	index  TokenIndex // optional; resolves jti/subject -> cache key(s)
 	logger *slog.Logger
 	secret string // optional HMAC secret for webhook auth
 }
 
 // NewRevocationHandler creates a revocation webhook handler.
-func NewRevocationHandler(cache Cache, webhookSecret string, logger *slog.Logger) *RevocationHandler {
+//
+// The optional index lets jti- and subject-scoped events resolve the exact
+// cache keys to delete. Without it, jti-based revocation cannot locate the
+// cache entry (which is keyed by token hash) and subject-based RevokeAll
+// falls back to flushing the whole cache.
+func NewRevocationHandler(cache Cache, webhookSecret string, logger *slog.Logger, index ...TokenIndex) *RevocationHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &RevocationHandler{
+	h := &RevocationHandler{
 		cache:  cache,
 		logger: logger,
 		secret: webhookSecret,
 	}
+	if len(index) > 0 {
+		h.index = index[0]
+	}
+	return h
 }
 
 // ServeHTTP handles POST /revoke webhook events.
@@ -114,16 +124,43 @@ func (h *RevocationHandler) process(ctx context.Context, event *RevocationEvent)
 
 	if event.JTI != "" {
 		h.logger.Info("revoking token by JTI", "jti", event.JTI)
-		// JTI is used as cache key when token hash is not available
-		return h.cache.Delete(ctx, event.JTI)
+		return h.deleteByIndex(ctx, "jti", event.JTI)
 	}
 
 	if event.RevokeAll && event.Subject != "" {
-		// For flush-all scenarios, we clear the entire cache.
-		// Production systems should use a more targeted approach (e.g., per-user key prefix).
-		h.logger.Warn("flushing all cache entries for subject", "sub", event.Subject)
-		return h.cache.Flush(ctx)
+		h.logger.Info("revoking all tokens for subject", "sub", event.Subject)
+		return h.deleteByIndex(ctx, "subject", event.Subject)
 	}
 
 	return fmt.Errorf("revocation event has no identifiable token reference")
+}
+
+// deleteByIndex resolves the cache keys for a jti/subject via the index and
+// deletes each. Without an index it cannot target the correct key, so it
+// returns an error rather than silently no-op'ing (jti) or nuking the whole
+// cache (subject).
+func (h *RevocationHandler) deleteByIndex(ctx context.Context, kind, value string) error {
+	if h.index == nil {
+		return fmt.Errorf("cannot revoke by %s without a token index configured", kind)
+	}
+
+	var (
+		keys []string
+		err  error
+	)
+	if kind == "jti" {
+		keys, err = h.index.KeysByJTI(ctx, value)
+	} else {
+		keys, err = h.index.KeysBySubject(ctx, value)
+	}
+	if err != nil {
+		return fmt.Errorf("resolving %s in token index: %w", kind, err)
+	}
+
+	for _, key := range keys {
+		if derr := h.cache.Delete(ctx, key); derr != nil {
+			return fmt.Errorf("deleting cache key for %s %q: %w", kind, value, derr)
+		}
+	}
+	return nil
 }

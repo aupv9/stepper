@@ -108,6 +108,7 @@ func introToCommonClaims(r *IntrospectionResponse) *CommonClaims {
 		ACR:      r.ACR,
 		AMR:      r.AMR,
 		Username: r.Username,
+		JTI:      r.JTI,
 	}
 	if r.Exp > 0 {
 		c.ExpiresAt = time.Unix(r.Exp, 0)

@@ -38,11 +38,11 @@ type DPoPProof struct {
 	JWK       map[string]interface{}
 
 	// Payload fields
-	JTI  string    // unique proof ID
-	HTM  string    // HTTP method
-	HTU  string    // HTTP URI
-	IAT  time.Time // issued at
-	ATH  string    // access token hash (base64url SHA-256)
+	JTI string    // unique proof ID
+	HTM string    // HTTP method
+	HTU string    // HTTP URI
+	IAT time.Time // issued at
+	ATH string    // access token hash (base64url SHA-256)
 }
 
 // ValidateDPoP validates the DPoP proof from the request header against the access token.

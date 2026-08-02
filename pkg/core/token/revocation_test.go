@@ -88,10 +88,15 @@ func TestRevocationHandler_MissingHMAC_WhenSecretRequired(t *testing.T) {
 }
 
 func TestRevocationHandler_RevokeByJTI(t *testing.T) {
+	ctx := context.Background()
 	cache := NewMemoryCache()
-	h := NewRevocationHandler(cache, "", nil)
+	index := NewMemoryTokenIndex()
+	h := NewRevocationHandler(cache, "", nil, index)
 
-	_ = cache.Set(context.Background(), "jti-abc", &CommonClaims{Active: true}, time.Minute)
+	// The cache is keyed by token hash; the index maps jti -> hash.
+	hash := HashToken("realtoken")
+	_ = cache.Set(ctx, hash, &CommonClaims{Active: true, JTI: "jti-abc"}, time.Minute)
+	_ = index.Add(ctx, hash, "jti-abc", "grace", time.Minute)
 
 	body, _ := json.Marshal(RevocationEvent{JTI: "jti-abc"})
 	req := httptest.NewRequest(http.MethodPost, "/revoke", bytes.NewReader(body))
@@ -100,6 +105,55 @@ func TestRevocationHandler_RevokeByJTI(t *testing.T) {
 
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", rr.Code)
+	}
+	if _, ok := cache.Get(ctx, hash); ok {
+		t.Error("token should have been evicted from cache by jti revocation")
+	}
+}
+
+func TestRevocationHandler_RevokeByJTI_NoIndex(t *testing.T) {
+	// Without an index, jti-based revocation cannot target the cache key and
+	// must surface an error instead of silently no-op'ing.
+	cache := NewMemoryCache()
+	h := NewRevocationHandler(cache, "", nil)
+
+	body, _ := json.Marshal(RevocationEvent{JTI: "jti-x"})
+	req := httptest.NewRequest(http.MethodPost, "/revoke", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 without index, got %d", rr.Code)
+	}
+}
+
+func TestRevocationHandler_RevokeAllBySubject_IsScoped(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryCache()
+	index := NewMemoryTokenIndex()
+	h := NewRevocationHandler(cache, "", nil, index)
+
+	// Two subjects cached; revoking all of "alice" must not touch "bob".
+	aliceHash := HashToken("alice-token")
+	bobHash := HashToken("bob-token")
+	_ = cache.Set(ctx, aliceHash, &CommonClaims{Active: true, Subject: "alice"}, time.Minute)
+	_ = cache.Set(ctx, bobHash, &CommonClaims{Active: true, Subject: "bob"}, time.Minute)
+	_ = index.Add(ctx, aliceHash, "jti-a", "alice", time.Minute)
+	_ = index.Add(ctx, bobHash, "jti-b", "bob", time.Minute)
+
+	body, _ := json.Marshal(RevocationEvent{RevokeAll: true, Subject: "alice"})
+	req := httptest.NewRequest(http.MethodPost, "/revoke", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rr.Code)
+	}
+	if _, ok := cache.Get(ctx, aliceHash); ok {
+		t.Error("alice's token should have been revoked")
+	}
+	if _, ok := cache.Get(ctx, bobHash); !ok {
+		t.Error("bob's token must NOT be revoked by a subject-scoped event for alice")
 	}
 }
 

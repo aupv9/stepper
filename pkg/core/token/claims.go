@@ -26,12 +26,16 @@ type CommonClaims struct {
 	IssuedAt  time.Time
 
 	// Auth context (RFC 9470)
-	ACR string `json:"acr"` // Authentication Context Class Reference
+	ACR string   `json:"acr"` // Authentication Context Class Reference
 	AMR []string `json:"amr"` // Authentication Methods References
 
 	// Session
-	SessionID   string    `json:"sid"`
-	AuthTime    time.Time `json:"auth_time"` // when user authenticated (for max_age check)
+	SessionID string    `json:"sid"`
+	AuthTime  time.Time `json:"auth_time"` // when user authenticated (for max_age check)
+
+	// JTI is the token's unique ID (RFC 7662). Used to build the revocation
+	// index so a webhook that only knows the jti can invalidate the cache entry.
+	JTI string `json:"jti,omitempty"`
 
 	// Identity
 	Email    string `json:"email"`

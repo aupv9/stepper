@@ -26,8 +26,9 @@ type Guard struct {
 	sm            *stepup.StateMachine
 	audit         *telemetry.AuditLogger
 	metrics       *telemetry.Metrics
-	next          http.Handler // upstream handler (proxy or direct)
-	cache         token.Cache  // optional; nil = no caching
+	next          http.Handler     // upstream handler (proxy or direct)
+	cache         token.Cache      // optional; nil = no caching
+	index         token.TokenIndex // optional; jti/subject -> cache key, for revocation
 	enableDPoP    bool
 	webhookSecret string
 	cookieSecret  string
@@ -68,6 +69,13 @@ func NewGuard(cfg GuardConfig) *Guard {
 	if realm == "" {
 		realm = "IAM"
 	}
+	// When a cache is configured, keep a revocation index so jti/subject-scoped
+	// webhook events can target the exact cache entries.
+	var index token.TokenIndex
+	if cfg.Cache != nil {
+		index = token.NewMemoryTokenIndex()
+	}
+
 	return &Guard{
 		registry:      cfg.Registry,
 		resolver:      cfg.Resolver,
@@ -78,6 +86,7 @@ func NewGuard(cfg GuardConfig) *Guard {
 		metrics:       cfg.Metrics,
 		next:          cfg.Upstream,
 		cache:         cfg.Cache,
+		index:         index,
 		enableDPoP:    cfg.EnableDPoP,
 		webhookSecret: cfg.WebhookSecret,
 		cookieSecret:  cfg.CookieSecret,
@@ -213,7 +222,11 @@ func (g *Guard) introspect(ctx context.Context, provider interface {
 		if ttl <= 0 || ttl > 30*time.Second {
 			ttl = 30 * time.Second
 		}
-		_ = g.cache.Set(ctx, token.HashToken(rawToken), claims, ttl)
+		hash := token.HashToken(rawToken)
+		_ = g.cache.Set(ctx, hash, claims, ttl)
+		if g.index != nil {
+			_ = g.index.Add(ctx, hash, claims.JTI, claims.Subject, ttl)
+		}
 	}
 
 	return claims, nil
@@ -226,7 +239,7 @@ func (g *Guard) RevocationHandler() http.Handler {
 	if c == nil {
 		c = token.NewMemoryCache()
 	}
-	return token.NewRevocationHandler(c, g.webhookSecret, nil)
+	return token.NewRevocationHandler(c, g.webhookSecret, nil, g.index)
 }
 
 func (g *Guard) handleDenial(ctx context.Context, w http.ResponseWriter, r *http.Request, subject, tenantID string, result *policy.PolicyResult) {
