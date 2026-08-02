@@ -29,8 +29,34 @@ type IntrospectionResponse struct {
 	TokenType string   `json:"token_type"`
 	JTI       string   `json:"jti"`
 
+	// Aud is the RFC 7662 aud claim; a string or array of strings per RFC 7519 §4.1.3.
+	Aud Audience `json:"aud,omitempty"`
+
+	// Cnf is the RFC 7800 confirmation claim; cnf.jkt binds the token to a
+	// DPoP key (RFC 9449 §6.1).
+	Cnf *Confirmation `json:"cnf,omitempty"`
+
 	// AuthorizationDetails carries RFC 9396 authorization_details when present.
 	AuthorizationDetails []rar.AuthorizationDetail `json:"authorization_details,omitempty"`
+}
+
+// Audience unmarshals the JWT aud claim, which may be a single string or an
+// array of strings (RFC 7519 §4.1.3).
+type Audience []string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (a *Audience) UnmarshalJSON(b []byte) error {
+	var single string
+	if err := json.Unmarshal(b, &single); err == nil {
+		*a = Audience{single}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(b, &many); err != nil {
+		return fmt.Errorf("aud must be a string or array of strings: %w", err)
+	}
+	*a = Audience(many)
+	return nil
 }
 
 // IntrospectorConfig holds configuration for the token introspector.
@@ -72,6 +98,7 @@ func (i *Introspector) Introspect(ctx context.Context, token string) (*CommonCla
 
 	form := url.Values{}
 	form.Set("token", token)
+	form.Set("token_type_hint", "access_token") // RFC 7662 §2.1 SHOULD
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, i.cfg.Endpoint,
 		strings.NewReader(form.Encode()))
@@ -102,12 +129,15 @@ func (i *Introspector) Introspect(ctx context.Context, token string) (*CommonCla
 // introToCommonClaims maps an IntrospectionResponse to CommonClaims.
 func introToCommonClaims(r *IntrospectionResponse) *CommonClaims {
 	c := &CommonClaims{
-		Active:   r.Active,
-		Subject:  r.Sub,
-		Issuer:   r.Iss,
-		ACR:      r.ACR,
-		AMR:      r.AMR,
-		Username: r.Username,
+		Active:       r.Active,
+		Subject:      r.Sub,
+		Issuer:       r.Iss,
+		Audience:     r.Aud,
+		JTI:          r.JTI,
+		ACR:          r.ACR,
+		AMR:          r.AMR,
+		Username:     r.Username,
+		Confirmation: r.Cnf,
 	}
 	if r.Exp > 0 {
 		c.ExpiresAt = time.Unix(r.Exp, 0)

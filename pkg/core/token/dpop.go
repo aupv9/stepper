@@ -4,14 +4,31 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
+)
+
+// DPoP sentinel errors.
+var (
+	// ErrDPoPReplay indicates a DPoP proof jti was seen before (RFC 9449 §11.1).
+	ErrDPoPReplay = errors.New("dpop proof replay detected")
+
+	// ErrDPoPNonceRequired indicates the server requires a fresh nonce; respond
+	// with 401, error="use_dpop_nonce" and a DPoP-Nonce header (RFC 9449 §8).
+	ErrDPoPNonceRequired = errors.New("dpop nonce required")
+
+	// ErrDPoPMissingATH indicates the proof lacks the mandatory ath claim.
+	ErrDPoPMissingATH = errors.New("dpop proof missing ath (access token hash) claim")
 )
 
 // DPoPConfig holds configuration for DPoP proof validation (RFC 9449).
@@ -21,6 +38,10 @@ type DPoPConfig struct {
 
 	// RequireHTTPS enforces that the htu claim uses HTTPS.
 	RequireHTTPS bool
+
+	// Nonce, when set, requires proofs to carry a valid server-issued nonce
+	// claim (RFC 9449 §8). Proofs without one fail with ErrDPoPNonceRequired.
+	Nonce *NonceProvider
 }
 
 // DefaultDPoPConfig returns sensible defaults.
@@ -38,11 +59,61 @@ type DPoPProof struct {
 	JWK       map[string]interface{}
 
 	// Payload fields
-	JTI  string    // unique proof ID
-	HTM  string    // HTTP method
-	HTU  string    // HTTP URI
-	IAT  time.Time // issued at
-	ATH  string    // access token hash (base64url SHA-256)
+	JTI   string    // unique proof ID
+	HTM   string    // HTTP method
+	HTU   string    // HTTP URI
+	IAT   time.Time // issued at
+	ATH   string    // access token hash (base64url SHA-256)
+	Nonce string    // server-issued nonce (RFC 9449 §8)
+}
+
+// Thumbprint computes the RFC 7638 SHA-256 thumbprint (base64url, no padding)
+// of the proof's embedded JWK. Compare it against the access token's cnf.jkt
+// to enforce key binding (RFC 9449 §6.1).
+func (p *DPoPProof) Thumbprint() (string, error) {
+	return JWKThumbprint(p.JWK)
+}
+
+// JWKThumbprint computes the RFC 7638 JWK SHA-256 thumbprint: the required
+// members of the key (per key type) serialized in lexicographic order with no
+// whitespace, hashed with SHA-256 and base64url-encoded without padding.
+func JWKThumbprint(jwk map[string]interface{}) (string, error) {
+	kty, _ := jwk["kty"].(string)
+	var members []string
+	switch kty {
+	case "EC":
+		members = []string{"crv", "kty", "x", "y"}
+	case "RSA":
+		members = []string{"e", "kty", "n"}
+	case "OKP":
+		members = []string{"crv", "kty", "x"}
+	default:
+		return "", fmt.Errorf("unsupported JWK kty for thumbprint: %q", kty)
+	}
+	sort.Strings(members)
+
+	var sb strings.Builder
+	sb.WriteByte('{')
+	for i, m := range members {
+		v, ok := jwk[m].(string)
+		if !ok || v == "" {
+			return "", fmt.Errorf("JWK missing required member %q for thumbprint", m)
+		}
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		// Required members are all string-valued; encode via json.Marshal to
+		// handle any escaping correctly.
+		kb, _ := json.Marshal(m)
+		vb, _ := json.Marshal(v)
+		sb.Write(kb)
+		sb.WriteByte(':')
+		sb.Write(vb)
+	}
+	sb.WriteByte('}')
+
+	sum := sha256.Sum256([]byte(sb.String()))
+	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
 
 // ValidateDPoP validates the DPoP proof from the request header against the access token.
@@ -89,15 +160,120 @@ func ValidateDPoP(r *http.Request, accessToken string, cfg DPoPConfig) (*DPoPPro
 		return nil, fmt.Errorf("DPoP proof issued in the future")
 	}
 
-	// Validate ATH (access token hash) if present
-	if proof.ATH != "" {
-		expectedATH := hashTokenForDPoP(accessToken)
-		if proof.ATH != expectedATH {
-			return nil, ErrDPoPBindingMismatch
-		}
+	// Validate ATH (access token hash) — mandatory. A proof that does not
+	// commit to the access token can be replayed with any stolen token.
+	if proof.ATH == "" {
+		return nil, ErrDPoPMissingATH
+	}
+	if proof.ATH != hashTokenForDPoP(accessToken) {
+		return nil, ErrDPoPBindingMismatch
+	}
+
+	// Validate server-issued nonce when required (RFC 9449 §8).
+	if cfg.Nonce != nil && !cfg.Nonce.Valid(proof.Nonce) {
+		return nil, ErrDPoPNonceRequired
 	}
 
 	return proof, nil
+}
+
+// DPoPValidator validates DPoP proofs with jti replay protection.
+// The replay cache records each seen jti for the proof MaxAge window;
+// a second proof with the same jti is rejected (RFC 9449 §11.1).
+type DPoPValidator struct {
+	cfg   DPoPConfig
+	cache Cache
+}
+
+const dpopJTIPrefix = "dpop:jti:"
+
+// NewDPoPValidator creates a validator. If cache is nil an in-memory cache is
+// used (single-instance replay protection only — pass a shared cache in
+// multi-instance deployments).
+func NewDPoPValidator(cfg DPoPConfig, cache Cache) *DPoPValidator {
+	if cfg.MaxAge <= 0 {
+		cfg.MaxAge = 60 * time.Second
+	}
+	if cache == nil {
+		cache = NewMemoryCache()
+	}
+	return &DPoPValidator{cfg: cfg, cache: cache}
+}
+
+// Validate runs full proof validation (ValidateDPoP) plus jti replay detection.
+func (v *DPoPValidator) Validate(r *http.Request, accessToken string) (*DPoPProof, error) {
+	proof, err := ValidateDPoP(r, accessToken, v.cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if proof.JTI == "" {
+		return nil, fmt.Errorf("dpop proof missing jti claim")
+	}
+	ctx := r.Context()
+	key := dpopJTIPrefix + proof.JTI
+	if _, seen := v.cache.Get(ctx, key); seen {
+		return nil, ErrDPoPReplay
+	}
+	// Record the jti for the proof acceptance window; entries expire with it.
+	_ = v.cache.Set(ctx, key, &CommonClaims{}, v.cfg.MaxAge)
+
+	return proof, nil
+}
+
+// NonceProvider issues and validates server DPoP nonces (RFC 9449 §8).
+// Nonces are HMAC(secret, time-window) so they need no storage and stay valid
+// across instances sharing the secret. The current and previous windows are
+// both accepted, giving clients between Window and 2×Window to use a nonce.
+type NonceProvider struct {
+	secret []byte
+	window time.Duration
+}
+
+// NewNonceProvider creates a nonce provider. Window defaults to 5 minutes.
+func NewNonceProvider(secret string, window time.Duration) *NonceProvider {
+	if window <= 0 {
+		window = 5 * time.Minute
+	}
+	return &NonceProvider{secret: []byte(secret), window: window}
+}
+
+// Current returns the nonce for the current time window; send it to clients
+// in the DPoP-Nonce response header.
+func (n *NonceProvider) Current() string {
+	return n.forWindow(time.Now().UnixNano() / int64(n.window))
+}
+
+// Valid reports whether nonce matches the current or previous window.
+func (n *NonceProvider) Valid(nonce string) bool {
+	if nonce == "" {
+		return false
+	}
+	w := time.Now().UnixNano() / int64(n.window)
+	return hmac.Equal([]byte(nonce), []byte(n.forWindow(w))) ||
+		hmac.Equal([]byte(nonce), []byte(n.forWindow(w-1)))
+}
+
+func (n *NonceProvider) forWindow(w int64) string {
+	mac := hmac.New(sha256.New, n.secret)
+	fmt.Fprintf(mac, "%d", w)
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// VerifyDPoPBinding enforces RFC 9449 §6.1 key binding: the access token's
+// cnf.jkt thumbprint must equal the RFC 7638 thumbprint of the proof's JWK.
+func VerifyDPoPBinding(proof *DPoPProof, claims *CommonClaims) error {
+	if claims.Confirmation == nil || claims.Confirmation.JKT == "" {
+		return fmt.Errorf("access token is not DPoP-bound (no cnf.jkt claim)")
+	}
+	thumb, err := proof.Thumbprint()
+	if err != nil {
+		return fmt.Errorf("computing proof JWK thumbprint: %w", err)
+	}
+	if !hmac.Equal([]byte(thumb), []byte(claims.Confirmation.JKT)) {
+		return ErrDPoPBindingMismatch
+	}
+	return nil
 }
 
 // parseDPoPJWT parses the DPoP proof JWT header and payload.
@@ -129,11 +305,12 @@ func parseDPoPJWT(jwt string) (*DPoPProof, error) {
 	}
 
 	var payload struct {
-		JTI string `json:"jti"`
-		HTM string `json:"htm"`
-		HTU string `json:"htu"`
-		IAT int64  `json:"iat"`
-		ATH string `json:"ath"`
+		JTI   string `json:"jti"`
+		HTM   string `json:"htm"`
+		HTU   string `json:"htu"`
+		IAT   int64  `json:"iat"`
+		ATH   string `json:"ath"`
+		Nonce string `json:"nonce"`
 	}
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		return nil, fmt.Errorf("parsing payload: %w", err)
@@ -147,6 +324,7 @@ func parseDPoPJWT(jwt string) (*DPoPProof, error) {
 		HTU:       payload.HTU,
 		IAT:       time.Unix(payload.IAT, 0),
 		ATH:       payload.ATH,
+		Nonce:     payload.Nonce,
 	}, nil
 }
 

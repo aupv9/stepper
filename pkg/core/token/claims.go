@@ -22,8 +22,14 @@ type CommonClaims struct {
 	Subject   string   `json:"sub"`
 	Issuer    string   `json:"iss"`
 	Audience  []string `json:"aud"`
+	JTI       string   `json:"jti"`
 	ExpiresAt time.Time
 	IssuedAt  time.Time
+
+	// Confirmation carries the RFC 7800 cnf claim. For DPoP-bound tokens
+	// (RFC 9449) JKT holds the RFC 7638 SHA-256 thumbprint of the client's
+	// public key; the guard compares it against the DPoP proof's JWK.
+	Confirmation *Confirmation `json:"cnf,omitempty"`
 
 	// Auth context (RFC 9470)
 	ACR string `json:"acr"` // Authentication Context Class Reference
@@ -51,6 +57,13 @@ type CommonClaims struct {
 
 	// Active (from RFC 7662 introspection)
 	Active bool
+}
+
+// Confirmation is the RFC 7800 cnf (confirmation) claim.
+type Confirmation struct {
+	// JKT is the RFC 7638 JWK SHA-256 thumbprint (base64url, no padding)
+	// of the DPoP public key the token is bound to (RFC 9449 §6.1).
+	JKT string `json:"jkt,omitempty"`
 }
 
 // AuthAge returns how long ago the user authenticated.

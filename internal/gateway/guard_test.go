@@ -508,3 +508,83 @@ func TestGuard_StepUpCookieReplay(t *testing.T) {
 		t.Errorf("upstream received path %q, want %q", upstreamPath, "/original")
 	}
 }
+
+// TestGuard_StepUpCookieReplay_InsufficientACR_NoBypass is the regression test
+// for the step-up replay bypass: a token that satisfies the landing path
+// (/callback, bronze) but NOT the saved resource (/original, silver) must not
+// be forwarded to /original just because it carries the step-up cookie.
+func TestGuard_StepUpCookieReplay_InsufficientACR_NoBypass(t *testing.T) {
+	as, provider := setupAS(t)
+
+	pCfg := &policy.Config{
+		ACRLevels: []string{"urn:mace:incommon:iap:bronze", "urn:mace:incommon:iap:silver"},
+		Policies: []policy.Policy{
+			{
+				Name:       "need-silver-for-original",
+				Resources:  []string{"/original"},
+				RequireACR: "urn:mace:incommon:iap:silver",
+				Enabled:    true,
+			},
+			{
+				Name:       "allow-callback",
+				Resources:  []string{"/callback"},
+				RequireACR: "urn:mace:incommon:iap:bronze",
+				Enabled:    true,
+			},
+		},
+	}
+
+	var upstreamHits []string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits = append(upstreamHits, r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, srv := buildGuard(t, provider, gateway.GuardConfig{
+		PolicyEngine: policy.New(pCfg),
+		CookieSecret: "test-replay-secret",
+		Upstream:     upstream,
+	})
+
+	bronzeToken, err := as.IssueToken(tokenfactory.TokenOptions{
+		Subject:   "mallory",
+		ACR:       "urn:mace:incommon:iap:bronze",
+		Scopes:    []string{"openid"},
+		ExpiresIn: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("IssueToken (bronze): %v", err)
+	}
+
+	// Step 1: trigger the challenge on /original to obtain the state cookie.
+	req1, _ := http.NewRequest(http.MethodGet, srv.URL+"/original", nil)
+	req1.Header.Set("Authorization", "Bearer "+bronzeToken)
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if resp1.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("first request: expected 401, got %d", resp1.StatusCode)
+	}
+
+	// Step 2: WITHOUT stepping up, hit /callback with the SAME bronze token
+	// and the step-up cookie. The guard must not replay to /original.
+	req2, _ := http.NewRequest(http.MethodGet, srv.URL+"/callback", nil)
+	req2.Header.Set("Authorization", "Bearer "+bronzeToken)
+	for _, c := range resp1.Cookies() {
+		req2.AddCookie(c)
+	}
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 (step-up still required), got %d", resp2.StatusCode)
+	}
+	for _, p := range upstreamHits {
+		if p == "/original" {
+			t.Fatal("BYPASS: bronze token reached /original via step-up cookie replay")
+		}
+	}
+}

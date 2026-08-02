@@ -114,6 +114,7 @@ func (sm *StateMachine) BeginChallenge(r *http.Request, challenge *StepUpChallen
 		Method:  r.Method,
 		Path:    r.URL.Path,
 		Query:   r.URL.RawQuery,
+		StateID: newStateID(),
 		SavedAt: time.Now(),
 		ACRHint: challenge.ACRValues,
 		MaxAge:  challenge.MaxAge,

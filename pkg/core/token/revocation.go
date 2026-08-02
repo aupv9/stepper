@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // RevocationEvent represents a token revocation notification.
@@ -114,16 +115,118 @@ func (h *RevocationHandler) process(ctx context.Context, event *RevocationEvent)
 
 	if event.JTI != "" {
 		h.logger.Info("revoking token by JTI", "jti", event.JTI)
-		// JTI is used as cache key when token hash is not available
+		// Resolve the jti to its token hash via the secondary index so the
+		// actual cache entry is evicted, then drop the index entry itself.
+		if hash, ok := lookupIndexHash(ctx, h.cache, jtiIndexPrefix+event.JTI); ok {
+			_ = h.cache.Delete(ctx, jtiIndexPrefix+event.JTI)
+			return h.cache.Delete(ctx, hash)
+		}
+		// Legacy fallback: some callers cached directly under the jti.
 		return h.cache.Delete(ctx, event.JTI)
 	}
 
+	if event.SessionID != "" {
+		h.logger.Info("revoking tokens by session", "sid", event.SessionID)
+		return deleteIndexedTokens(ctx, h.cache, sidIndexPrefix+event.SessionID)
+	}
+
 	if event.RevokeAll && event.Subject != "" {
-		// For flush-all scenarios, we clear the entire cache.
-		// Production systems should use a more targeted approach (e.g., per-user key prefix).
-		h.logger.Warn("flushing all cache entries for subject", "sub", event.Subject)
-		return h.cache.Flush(ctx)
+		// Targeted eviction: delete only the cached tokens recorded for this
+		// subject instead of flushing the whole (shared, multi-tenant) cache.
+		h.logger.Info("revoking all cached tokens for subject", "sub", event.Subject)
+		return deleteIndexedTokens(ctx, h.cache, subIndexPrefix+event.Subject)
 	}
 
 	return fmt.Errorf("revocation event has no identifiable token reference")
+}
+
+// --- Secondary index (jti / subject / session → token hash) ---
+//
+// The index reuses the claims Cache itself so it works with any Cache
+// implementation (memory, Redis, user-provided). Index entries are stored as
+// CommonClaims whose Extra["hashes"] holds the token hashes.
+
+const (
+	jtiIndexPrefix = "idx:jti:"
+	subIndexPrefix = "idx:sub:"
+	sidIndexPrefix = "idx:sid:"
+)
+
+// IndexClaims records secondary index entries for a cached token so later
+// revocation events (by jti, subject, or session) can evict the exact cache
+// entries instead of flushing the whole cache. Call it right after caching
+// introspection results; ttl should match (or exceed) the cache entry's TTL.
+func IndexClaims(ctx context.Context, c Cache, tokenHash string, claims *CommonClaims, ttl time.Duration) {
+	if c == nil || claims == nil || tokenHash == "" || ttl <= 0 {
+		return
+	}
+	if claims.JTI != "" {
+		entry := &CommonClaims{Extra: map[string]interface{}{"hashes": []string{tokenHash}}}
+		_ = c.Set(ctx, jtiIndexPrefix+claims.JTI, entry, ttl)
+	}
+	if claims.Subject != "" {
+		appendIndexHash(ctx, c, subIndexPrefix+claims.Subject, tokenHash, ttl)
+	}
+	if claims.SessionID != "" {
+		appendIndexHash(ctx, c, sidIndexPrefix+claims.SessionID, tokenHash, ttl)
+	}
+}
+
+// appendIndexHash adds tokenHash to the index entry at key (read-modify-write).
+func appendIndexHash(ctx context.Context, c Cache, key, tokenHash string, ttl time.Duration) {
+	hashes := indexHashes(ctx, c, key)
+	for _, h := range hashes {
+		if h == tokenHash {
+			return
+		}
+	}
+	hashes = append(hashes, tokenHash)
+	entry := &CommonClaims{Extra: map[string]interface{}{"hashes": hashes}}
+	_ = c.Set(ctx, key, entry, ttl)
+}
+
+// indexHashes returns the token hashes recorded under an index key.
+func indexHashes(ctx context.Context, c Cache, key string) []string {
+	entry, ok := c.Get(ctx, key)
+	if !ok || entry == nil || entry.Extra == nil {
+		return nil
+	}
+	switch v := entry.Extra["hashes"].(type) {
+	case []string:
+		return v
+	case []interface{}: // after a JSON round-trip (e.g. Redis)
+		out := make([]string, 0, len(v))
+		for _, x := range v {
+			if s, ok := x.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// lookupIndexHash returns the single token hash stored under an index key.
+func lookupIndexHash(ctx context.Context, c Cache, key string) (string, bool) {
+	hashes := indexHashes(ctx, c, key)
+	if len(hashes) == 0 {
+		return "", false
+	}
+	return hashes[0], true
+}
+
+// deleteIndexedTokens evicts every token hash recorded under an index key,
+// then removes the index entry itself.
+func deleteIndexedTokens(ctx context.Context, c Cache, key string) error {
+	var firstErr error
+	for _, hash := range indexHashes(ctx, c, key) {
+		if err := c.Delete(ctx, hash); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if err := c.Delete(ctx, key); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
 }
