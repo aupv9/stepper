@@ -87,7 +87,7 @@ func newE2EEnv(t *testing.T, pCfg *policy.Config, adminToken, cookieSecret strin
 
 	guard := gateway.NewGuard(gateway.GuardConfig{
 		Registry:     reg,
-		Resolver:     tenant.NewChainResolver(tenant.NewHeaderResolver("X-Tenant-ID")),
+		Resolver:     tenant.NewChainResolver(tenant.NewHeaderResolver("X-Tenant-ID"), tenant.NewStaticResolver("default")),
 		PolicyEngine: eng,
 		Realm:        "Test",
 		Cache:        cache,
@@ -299,7 +299,7 @@ func TestE2E_MultiTenantIsolation(t *testing.T) {
 	eng := allowAllEngine()
 	guard := gateway.NewGuard(gateway.GuardConfig{
 		Registry:     reg,
-		Resolver:     tenant.NewChainResolver(tenant.NewHeaderResolver("X-Tenant-ID")),
+		Resolver:     tenant.NewChainResolver(tenant.NewHeaderResolver("X-Tenant-ID"), tenant.NewStaticResolver("default")),
 		Realm:        "Test",
 		Upstream:     upstream,
 		PolicyEngine: eng,

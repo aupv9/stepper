@@ -16,10 +16,10 @@ const claimsKey contextKey = iota
 
 // Config configures the IAM middleware.
 type Config struct {
-	Provider       providers.Provider
-	PolicyEngine   *policy.Engine
-	Realm          string
-	EnableDPoP     bool
+	Provider     providers.Provider
+	PolicyEngine *policy.Engine
+	Realm        string
+	EnableDPoP   bool
 }
 
 // Middleware returns a standard net/http middleware that:

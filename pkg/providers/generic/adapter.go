@@ -29,9 +29,9 @@ type Config struct {
 // Adapter is a generic OIDC provider adapter.
 // It auto-discovers endpoints via the OIDC discovery document.
 type Adapter struct {
-	cfg       Config
-	discovery *providers.OIDCDiscovery
-	mu        sync.RWMutex
+	cfg          Config
+	discovery    *providers.OIDCDiscovery
+	mu           sync.RWMutex
 	introspector *token.Introspector
 }
 

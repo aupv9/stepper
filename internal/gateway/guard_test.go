@@ -55,7 +55,12 @@ func buildGuard(t *testing.T, provider *generic.Adapter, cfg gateway.GuardConfig
 		cfg.Registry = reg
 	}
 	if cfg.Resolver == nil {
-		cfg.Resolver = tenant.NewChainResolver(tenant.NewHeaderResolver("X-Tenant-ID"))
+		// Header resolver with explicit single-tenant fallback (fail-closed
+		// resolution requires opting in to a default via StaticResolver).
+		cfg.Resolver = tenant.NewChainResolver(
+			tenant.NewHeaderResolver("X-Tenant-ID"),
+			tenant.NewStaticResolver("default"),
+		)
 	}
 	if cfg.Upstream == nil {
 		cfg.Upstream = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -352,6 +357,75 @@ func TestGuard_CookieOnStepUpChallenge(t *testing.T) {
 	}
 }
 
+// stubProvider is a providers.Provider whose introspection response omits iss
+// (legal per RFC 7662 §2.2) while still declaring a discovery issuer.
+type stubProvider struct {
+	issuer string
+	claims *token.CommonClaims
+}
+
+func (s *stubProvider) Introspect(context.Context, string) (*token.CommonClaims, error) {
+	return s.claims, nil
+}
+func (s *stubProvider) JWKS(context.Context) ([]byte, error) { return []byte(`{"keys":[]}`), nil }
+func (s *stubProvider) RefreshConfig(context.Context) error  { return nil }
+func (s *stubProvider) Name() string                         { return "stub" }
+func (s *stubProvider) Issuer() string                       { return s.issuer }
+
+// TestGuard_IssuerBinding_MissingIss_FailsClosed: when the provider declares an
+// issuer but the introspection response omits iss, the token cannot be bound
+// to the tenant and must be rejected — not silently accepted.
+func TestGuard_IssuerBinding_MissingIss_FailsClosed(t *testing.T) {
+	provider := &stubProvider{
+		issuer: "https://as.acme.example",
+		claims: &token.CommonClaims{
+			Active:    true,
+			Subject:   "mallory",
+			Issuer:    "", // AS omitted iss
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}
+
+	reg := tenant.NewRegistry()
+	reg.Register("default", provider)
+
+	pCfg := &policy.Config{
+		Policies: []policy.Policy{{Name: "open", Resources: []string{"/**"}, Enabled: true}},
+	}
+
+	guard := gateway.NewGuard(gateway.GuardConfig{
+		Registry:     reg,
+		Resolver:     tenant.NewStaticResolver("default"),
+		PolicyEngine: policy.New(pCfg),
+		Upstream: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}),
+		Realm: "Test",
+	})
+	srv := httptest.NewServer(guard)
+	t.Cleanup(srv.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/resource", nil)
+	req.Header.Set("Authorization", "Bearer whatever")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 when introspection omits iss, got %d", resp.StatusCode)
+	}
+
+	// Same setup but with matching iss must pass.
+	provider.claims.Issuer = "https://as.acme.example"
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request 2: %v", err)
+	}
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 with matching iss, got %d", resp2.StatusCode)
+	}
+}
+
 // TestGuard_MultiTenant_TokenIsolation verifies that a token issued by one tenant's AS
 // is rejected when presented to a guard routing to a different tenant's AS.
 func TestGuard_MultiTenant_TokenIsolation(t *testing.T) {
@@ -506,5 +580,146 @@ func TestGuard_StepUpCookieReplay(t *testing.T) {
 	// The upstream must have seen the original path, not /callback.
 	if upstreamPath != "/original" {
 		t.Errorf("upstream received path %q, want %q", upstreamPath, "/original")
+	}
+}
+
+// TestGuard_HeaderHygiene verifies that client-supplied identity headers are
+// stripped before proxying and replaced with values from the verified token.
+func TestGuard_HeaderHygiene(t *testing.T) {
+	as, provider := setupAS(t)
+
+	pCfg := &policy.Config{
+		Policies: []policy.Policy{
+			{Name: "open", Resources: []string{"/**"}, Enabled: true},
+		},
+	}
+
+	var got http.Header
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, srv := buildGuard(t, provider, gateway.GuardConfig{
+		PolicyEngine: policy.New(pCfg),
+		Upstream:     upstream,
+	})
+
+	raw, err := as.IssueToken(tokenfactory.TokenOptions{
+		Subject:   "alice",
+		ACR:       "urn:mace:incommon:iap:silver",
+		Scopes:    []string{"openid", "profile"},
+		ExpiresIn: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("IssueToken: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/resource", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	// Spoofed identity headers that must not reach the upstream.
+	req.Header.Set("X-Iam-Subject", "evil-admin")
+	req.Header.Set("X-Iam-Acr", "urn:mace:incommon:iap:gold")
+	req.Header.Set("X-Tenant-ID", "default")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	if got.Get("X-Iam-Subject") != "alice" {
+		t.Errorf("X-Iam-Subject = %q, want %q (spoofed value must be replaced)", got.Get("X-Iam-Subject"), "alice")
+	}
+	if got.Get("X-Iam-Acr") != "urn:mace:incommon:iap:silver" {
+		t.Errorf("X-Iam-Acr = %q, want verified silver ACR", got.Get("X-Iam-Acr"))
+	}
+	if got.Get("X-Iam-Tenant") != "default" {
+		t.Errorf("X-Iam-Tenant = %q, want %q", got.Get("X-Iam-Tenant"), "default")
+	}
+	if got.Get("X-Tenant-ID") != "" {
+		t.Errorf("X-Tenant-ID must be stripped before proxying, got %q", got.Get("X-Tenant-ID"))
+	}
+}
+
+// TestGuard_StepUpCookieReplay_InsufficientACR_NoBypass is the regression test
+// for the step-up replay bypass: a token that satisfies the landing path
+// (/callback, bronze) but NOT the saved resource (/original, silver) must not
+// be forwarded to /original just because it carries the step-up cookie.
+func TestGuard_StepUpCookieReplay_InsufficientACR_NoBypass(t *testing.T) {
+	as, provider := setupAS(t)
+
+	pCfg := &policy.Config{
+		ACRLevels: []string{"urn:mace:incommon:iap:bronze", "urn:mace:incommon:iap:silver"},
+		Policies: []policy.Policy{
+			{
+				Name:       "need-silver-for-original",
+				Resources:  []string{"/original"},
+				RequireACR: "urn:mace:incommon:iap:silver",
+				Enabled:    true,
+			},
+			{
+				Name:       "allow-callback",
+				Resources:  []string{"/callback"},
+				RequireACR: "urn:mace:incommon:iap:bronze",
+				Enabled:    true,
+			},
+		},
+	}
+
+	var upstreamHits []string
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits = append(upstreamHits, r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, srv := buildGuard(t, provider, gateway.GuardConfig{
+		PolicyEngine: policy.New(pCfg),
+		CookieSecret: "test-replay-secret",
+		Upstream:     upstream,
+	})
+
+	bronzeToken, err := as.IssueToken(tokenfactory.TokenOptions{
+		Subject:   "mallory",
+		ACR:       "urn:mace:incommon:iap:bronze",
+		Scopes:    []string{"openid"},
+		ExpiresIn: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("IssueToken (bronze): %v", err)
+	}
+
+	// Step 1: trigger the challenge on /original to obtain the state cookie.
+	req1, _ := http.NewRequest(http.MethodGet, srv.URL+"/original", nil)
+	req1.Header.Set("Authorization", "Bearer "+bronzeToken)
+	resp1, err := http.DefaultClient.Do(req1)
+	if err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if resp1.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("first request: expected 401, got %d", resp1.StatusCode)
+	}
+
+	// Step 2: WITHOUT stepping up, hit /callback with the SAME bronze token
+	// and the step-up cookie. The guard must not replay to /original.
+	req2, _ := http.NewRequest(http.MethodGet, srv.URL+"/callback", nil)
+	req2.Header.Set("Authorization", "Bearer "+bronzeToken)
+	for _, c := range resp1.Cookies() {
+		req2.AddCookie(c)
+	}
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 (step-up still required), got %d", resp2.StatusCode)
+	}
+	for _, p := range upstreamHits {
+		if p == "/original" {
+			t.Fatal("BYPASS: bronze token reached /original via step-up cookie replay")
+		}
 	}
 }

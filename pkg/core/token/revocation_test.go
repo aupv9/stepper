@@ -88,10 +88,15 @@ func TestRevocationHandler_MissingHMAC_WhenSecretRequired(t *testing.T) {
 }
 
 func TestRevocationHandler_RevokeByJTI(t *testing.T) {
+	ctx := context.Background()
 	cache := NewMemoryCache()
 	h := NewRevocationHandler(cache, "", nil)
 
-	_ = cache.Set(context.Background(), "jti-abc", &CommonClaims{Active: true}, time.Minute)
+	// Cache a token under its hash and index it by jti, as the guard does.
+	hash := HashToken("access-token-1")
+	claims := &CommonClaims{Active: true, JTI: "jti-abc", Subject: "alice"}
+	_ = cache.Set(ctx, hash, claims, time.Minute)
+	IndexClaims(ctx, cache, hash, claims, time.Minute)
 
 	body, _ := json.Marshal(RevocationEvent{JTI: "jti-abc"})
 	req := httptest.NewRequest(http.MethodPost, "/revoke", bytes.NewReader(body))
@@ -100,6 +105,71 @@ func TestRevocationHandler_RevokeByJTI(t *testing.T) {
 
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", rr.Code)
+	}
+	if _, ok := cache.Get(ctx, hash); ok {
+		t.Error("jti revocation must evict the token's actual cache entry")
+	}
+}
+
+func TestRevocationHandler_RevokeAllForSubject_Targeted(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryCache()
+	h := NewRevocationHandler(cache, "", nil)
+
+	// Two tokens for alice, one for bob.
+	aliceHash1 := HashToken("alice-tok-1")
+	aliceHash2 := HashToken("alice-tok-2")
+	bobHash := HashToken("bob-tok")
+	alice1 := &CommonClaims{Active: true, Subject: "alice", JTI: "a1"}
+	alice2 := &CommonClaims{Active: true, Subject: "alice", JTI: "a2"}
+	bob := &CommonClaims{Active: true, Subject: "bob", JTI: "b1"}
+	for _, e := range []struct {
+		hash   string
+		claims *CommonClaims
+	}{{aliceHash1, alice1}, {aliceHash2, alice2}, {bobHash, bob}} {
+		_ = cache.Set(ctx, e.hash, e.claims, time.Minute)
+		IndexClaims(ctx, cache, e.hash, e.claims, time.Minute)
+	}
+
+	body, _ := json.Marshal(RevocationEvent{Subject: "alice", RevokeAll: true})
+	req := httptest.NewRequest(http.MethodPost, "/revoke", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rr.Code)
+	}
+	if _, ok := cache.Get(ctx, aliceHash1); ok {
+		t.Error("alice token 1 should be evicted")
+	}
+	if _, ok := cache.Get(ctx, aliceHash2); ok {
+		t.Error("alice token 2 should be evicted")
+	}
+	if _, ok := cache.Get(ctx, bobHash); !ok {
+		t.Error("bob's token must NOT be evicted by alice's revoke-all")
+	}
+}
+
+func TestRevocationHandler_RevokeBySession(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMemoryCache()
+	h := NewRevocationHandler(cache, "", nil)
+
+	hash := HashToken("sess-tok")
+	claims := &CommonClaims{Active: true, Subject: "alice", SessionID: "sess-1"}
+	_ = cache.Set(ctx, hash, claims, time.Minute)
+	IndexClaims(ctx, cache, hash, claims, time.Minute)
+
+	body, _ := json.Marshal(RevocationEvent{SessionID: "sess-1"})
+	req := httptest.NewRequest(http.MethodPost, "/revoke", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rr.Code)
+	}
+	if _, ok := cache.Get(ctx, hash); ok {
+		t.Error("session revocation must evict the token's cache entry")
 	}
 }
 

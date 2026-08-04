@@ -58,8 +58,8 @@ func (e *Engine) matchesPolicy(p *Policy, req *PolicyRequest) bool {
 // check evaluates a matched policy against the token claims.
 func (e *Engine) check(p *Policy, req *PolicyRequest) *PolicyResult {
 	result := &PolicyResult{
-		MatchedPolicy: p,
-		RequiredACR:   p.RequireACR,
+		MatchedPolicy:  p,
+		RequiredACR:    p.RequireACR,
 		RequiredMaxAge: p.MaxAge,
 	}
 
@@ -83,8 +83,15 @@ func (e *Engine) check(p *Policy, req *PolicyRequest) *PolicyResult {
 		}
 	}
 
-	// Check max_age (auth time freshness)
-	if p.MaxAge > 0 && req.AuthAge > 0 {
+	// Check max_age (auth time freshness). Fail closed: a policy that
+	// demands auth freshness cannot be satisfied by a token that carries
+	// no auth_time claim at all (AuthAge == 0 means "unknown").
+	if p.MaxAge > 0 {
+		if req.AuthAge <= 0 {
+			result.Allowed = false
+			result.Reason = "policy requires max_age but token has no auth_time claim"
+			return result
+		}
 		maxAge := time.Duration(p.MaxAge) * time.Second
 		if req.AuthAge > maxAge {
 			result.Allowed = false

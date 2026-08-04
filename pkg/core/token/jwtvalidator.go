@@ -23,6 +23,18 @@ type JWTValidatorConfig struct {
 
 	// HTTPClient is used to fetch the JWKS (default: 10s timeout client).
 	HTTPClient *http.Client
+
+	// ExpectedIssuer, when set, rejects tokens whose iss claim differs.
+	ExpectedIssuer string
+
+	// ExpectedAudience, when set, rejects tokens whose aud claim does not
+	// contain this value.
+	ExpectedAudience string
+
+	// ValidMethods restricts acceptable signing algorithms (e.g. ["RS256",
+	// "ES256"]). Default: RS256/RS384/RS512/ES256/ES384/ES512 — "none" and
+	// HMAC algorithms are never accepted.
+	ValidMethods []string
 }
 
 // JWTValidator validates JWTs locally using a remote JWKS endpoint.
@@ -32,11 +44,16 @@ type JWTValidator struct {
 	jwksURL    string
 	httpClient *http.Client
 	cacheTTL   time.Duration
+	parseOpts  []jwt.ParserOption
 
 	mu        sync.RWMutex
 	keySet    map[string]crypto.PublicKey // kid → key; "" key for kidless JWKS
 	fetchedAt time.Time
 }
+
+// defaultValidMethods are the asymmetric algorithms accepted when
+// ValidMethods is not configured. HMAC and "none" are never accepted.
+var defaultValidMethods = []string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"}
 
 // NewJWTValidator creates a local JWT validator backed by a JWKS endpoint.
 func NewJWTValidator(cfg JWTValidatorConfig) *JWTValidator {
@@ -46,20 +63,35 @@ func NewJWTValidator(cfg JWTValidatorConfig) *JWTValidator {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: 10 * time.Second}
 	}
+
+	methods := cfg.ValidMethods
+	if len(methods) == 0 {
+		methods = defaultValidMethods
+	}
+	opts := []jwt.ParserOption{
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithValidMethods(methods),
+	}
+	if cfg.ExpectedIssuer != "" {
+		opts = append(opts, jwt.WithIssuer(cfg.ExpectedIssuer))
+	}
+	if cfg.ExpectedAudience != "" {
+		opts = append(opts, jwt.WithAudience(cfg.ExpectedAudience))
+	}
+
 	return &JWTValidator{
 		jwksURL:    cfg.JWKSURL,
 		httpClient: cfg.HTTPClient,
 		cacheTTL:   cfg.CacheTTL,
+		parseOpts:  opts,
 		keySet:     make(map[string]crypto.PublicKey),
 	}
 }
 
 // Validate parses and verifies a raw JWT, returning normalized CommonClaims.
 func (v *JWTValidator) Validate(ctx context.Context, rawToken string) (*CommonClaims, error) {
-	token, err := jwt.ParseWithClaims(rawToken, &jwtRawClaims{}, v.keyfunc(ctx),
-		jwt.WithExpirationRequired(),
-		jwt.WithIssuedAt(),
-	)
+	token, err := jwt.ParseWithClaims(rawToken, &jwtRawClaims{}, v.keyfunc(ctx), v.parseOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("jwt validation: %w", err)
 	}

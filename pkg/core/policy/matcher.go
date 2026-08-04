@@ -26,7 +26,9 @@ func MatchResource(pattern, requestPath string) bool {
 		if prefix == "" {
 			return true // ** matches everything
 		}
-		return strings.HasPrefix(requestPath, prefix)
+		// Require a path-segment boundary so /api** does not match /apiv2
+		// and /api/** does not match /api-internal/x.
+		return requestPath == prefix || strings.HasPrefix(requestPath, prefix+"/")
 	}
 
 	// Use path.Match for single-level wildcards

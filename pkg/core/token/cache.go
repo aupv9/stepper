@@ -176,9 +176,19 @@ func (ci *CachedIntrospector) Introspect(ctx context.Context, token string) (*Co
 		return nil, err
 	}
 
-	// Only cache active tokens
+	// Only cache active tokens; clamp TTL to the token's remaining lifetime
+	// so a cache entry never outlives the token itself.
 	if claims.Active {
-		_ = ci.cache.Set(ctx, key, claims, ci.ttl)
+		ttl := ci.ttl
+		if !claims.ExpiresAt.IsZero() {
+			if remaining := time.Until(claims.ExpiresAt); remaining < ttl {
+				ttl = remaining
+			}
+		}
+		if ttl > 0 {
+			_ = ci.cache.Set(ctx, key, claims, ttl)
+			IndexClaims(ctx, ci.cache, key, claims, ttl)
+		}
 	}
 
 	return claims, nil

@@ -179,12 +179,12 @@ func (s *Server) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]interface{}{
-		"active":  true,
-		"sub":     entry.subject,
-		"scope":   joinScopes(entry.scopes),
-		"acr":     entry.acr,
-		"exp":     entry.expiresAt.Unix(),
-		"iss":     s.issuer,
+		"active": true,
+		"sub":    entry.subject,
+		"scope":  joinScopes(entry.scopes),
+		"acr":    entry.acr,
+		"exp":    entry.expiresAt.Unix(),
+		"iss":    s.issuer,
 	})
 }
 

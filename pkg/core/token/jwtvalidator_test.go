@@ -87,7 +87,7 @@ func TestJWTValidator_ExpiredToken(t *testing.T) {
 
 func TestJWTValidator_WrongKey(t *testing.T) {
 	factory, _ := tokenfactory.New()
-	otherFactory, _ := tokenfactory.New() // different key pair
+	otherFactory, _ := tokenfactory.New()       // different key pair
 	jwksSrv := startJWKSServer(t, otherFactory) // serve other factory's JWKS
 
 	rawToken, _ := factory.Generate(tokenfactory.TokenOptions{

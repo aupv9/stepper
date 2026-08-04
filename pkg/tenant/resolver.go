@@ -15,6 +15,12 @@ type Resolver interface {
 
 // HeaderResolver reads the tenant ID from a request header.
 // Default header: X-Tenant-ID
+//
+// SECURITY: the header is client-controlled. Use HeaderResolver only behind a
+// trusted edge (ingress/API gateway) that sets or strips it; never expose it
+// directly to end users, or any caller can pick their tenant. The gateway
+// guard independently verifies that the token issuer matches the resolved
+// tenant's provider, but defense in depth starts at the edge.
 type HeaderResolver struct {
 	Header string
 }
@@ -82,6 +88,26 @@ func (p *PathResolver) Resolve(r *http.Request) (string, error) {
 		return "", fmt.Errorf("no tenant found at path segment %d", p.Segment)
 	}
 	return parts[p.Segment], nil
+}
+
+// --- Static Resolver ---
+
+// StaticResolver always resolves to a fixed tenant ID. Use it as the last
+// element of a ChainResolver to opt in to a default tenant for single-tenant
+// deployments; without it, tenant resolution fails closed.
+type StaticResolver struct {
+	TenantID string
+}
+
+func NewStaticResolver(tenantID string) *StaticResolver {
+	return &StaticResolver{TenantID: tenantID}
+}
+
+func (s *StaticResolver) Resolve(_ *http.Request) (string, error) {
+	if s.TenantID == "" {
+		return "", fmt.Errorf("static resolver has no tenant configured")
+	}
+	return s.TenantID, nil
 }
 
 // --- Chain Resolver ---

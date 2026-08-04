@@ -22,16 +22,22 @@ type CommonClaims struct {
 	Subject   string   `json:"sub"`
 	Issuer    string   `json:"iss"`
 	Audience  []string `json:"aud"`
+	JTI       string   `json:"jti"`
 	ExpiresAt time.Time
 	IssuedAt  time.Time
 
+	// Confirmation carries the RFC 7800 cnf claim. For DPoP-bound tokens
+	// (RFC 9449) JKT holds the RFC 7638 SHA-256 thumbprint of the client's
+	// public key; the guard compares it against the DPoP proof's JWK.
+	Confirmation *Confirmation `json:"cnf,omitempty"`
+
 	// Auth context (RFC 9470)
-	ACR string `json:"acr"` // Authentication Context Class Reference
+	ACR string   `json:"acr"` // Authentication Context Class Reference
 	AMR []string `json:"amr"` // Authentication Methods References
 
 	// Session
-	SessionID   string    `json:"sid"`
-	AuthTime    time.Time `json:"auth_time"` // when user authenticated (for max_age check)
+	SessionID string    `json:"sid"`
+	AuthTime  time.Time `json:"auth_time"` // when user authenticated (for max_age check)
 
 	// Identity
 	Email    string `json:"email"`
@@ -53,12 +59,50 @@ type CommonClaims struct {
 	Active bool
 }
 
+// Confirmation is the RFC 7800 cnf (confirmation) claim.
+type Confirmation struct {
+	// JKT is the RFC 7638 JWK SHA-256 thumbprint (base64url, no padding)
+	// of the DPoP public key the token is bound to (RFC 9449 §6.1).
+	JKT string `json:"jkt,omitempty"`
+}
+
 // AuthAge returns how long ago the user authenticated.
 func (c *CommonClaims) AuthAge() time.Duration {
 	if c.AuthTime.IsZero() {
 		return 0
 	}
 	return time.Since(c.AuthTime)
+}
+
+// --- FAPI 2.0 profile interface (pkg/core/fapi.TokenClaims) ---
+
+// HasDPoP reports whether the token is DPoP-bound (carries cnf.jkt).
+func (c *CommonClaims) HasDPoP() bool {
+	return c.Confirmation != nil && c.Confirmation.JKT != ""
+}
+
+// HasPARRequestURI reports whether the authorization was initiated via a
+// Pushed Authorization Request (request_uri or par_id claim present).
+func (c *CommonClaims) HasPARRequestURI() bool {
+	return c.extraString("request_uri") != "" || c.extraString("par_id") != ""
+}
+
+// GetAuthAge returns the time since user authentication (0 = unknown).
+func (c *CommonClaims) GetAuthAge() time.Duration {
+	return c.AuthAge()
+}
+
+// GetNonce returns the token's nonce claim, if any.
+func (c *CommonClaims) GetNonce() string {
+	return c.extraString("nonce")
+}
+
+func (c *CommonClaims) extraString(key string) string {
+	if c.Extra == nil {
+		return ""
+	}
+	s, _ := c.Extra[key].(string)
+	return s
 }
 
 // HasScope checks if the token contains a specific scope.

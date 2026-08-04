@@ -94,10 +94,10 @@ func TestEngine_MaxAge(t *testing.T) {
 			t.Error("expected denial when auth_age > max_age")
 		}
 	})
-	t.Run("zero auth_age skips check", func(t *testing.T) {
+	t.Run("missing auth_time fails closed", func(t *testing.T) {
 		result, _ := e.Evaluate(&PolicyRequest{Method: "GET", Path: "/secure", AuthAge: 0})
-		if !result.Allowed {
-			t.Errorf("zero AuthAge should skip max_age check, got: %s", result.Reason)
+		if result.Allowed {
+			t.Error("policy with max_age must deny tokens that carry no auth_time claim")
 		}
 	})
 }
