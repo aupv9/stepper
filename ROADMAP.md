@@ -111,12 +111,12 @@ Hiện `iam-service` chỉ chạy đúng khi single-instance (memory cache, khô
 
 ## 🟡 Milestone 7 — Policy engine v2
 
-- [ ] **Điều kiện mở rộng** — `require_roles`, IP CIDR allowlist/denylist, time-window (giờ làm việc), match theo request header.
-- [ ] **Tenant-scoped policies** — policy có field `tenants: [...]`; engine nhận `TenantID` trong `PolicyRequest`.
-- [ ] **Explicit deny + priority** — rule `effect: deny` thắng allow; sort theo `priority` thay vì thứ tự file.
-- [ ] **Policy test framework** — `iam-cli policy-test <policy.yaml> <tests.yaml>`: bảng test case (request → expected) chạy trong CI của người dùng; xuất diff khi đổi policy.
-- [ ] **Plugin interface cho external PDP** — interface `Evaluator` để cắm CEL expression hoặc OPA sidecar mà không đổi guard.
-- [ ] **Admin API v2** — CRUD policy qua API (hiện chỉ reload cả file), version + rollback, OpenAPI spec.
+- [x] **Điều kiện mở rộng** — `require_roles`, IP CIDR allowlist/denylist, time-window (giờ làm việc), match theo request header.
+- [x] **Tenant-scoped policies** — policy có field `tenants: [...]`; engine nhận `TenantID` trong `PolicyRequest`.
+- [x] **Explicit deny + priority** — rule `effect: deny` thắng allow; sort theo `priority` thay vì thứ tự file.
+- [x] **Policy test framework** — `iam-cli policy-test <policy.yaml> <tests.yaml>`: bảng test case (request → expected) chạy trong CI của người dùng; xuất diff khi đổi policy.
+- [x] **Plugin interface cho external PDP** — interface `policy.Evaluator`, guard nhận Evaluator bất kỳ. (Adapter CEL/OPA cụ thể chưa ship — chỉ cần implement interface.)
+- [x] **Admin API v2** — GET /policies, reload có version history (10 bản), POST /policy/rollback, OpenAPI spec (`docs/admin-openapi.yaml`). (Per-policy PUT/DELETE chưa cần — reload nguyên file là đơn vị an toàn hơn.)
 
 **Exit criteria:** policy có deny/priority/tenant-scope chạy đúng bộ policy-test; simulator + CLI hỗ trợ đủ field mới.
 
@@ -146,7 +146,7 @@ Hiện `iam-service` chỉ chạy đúng khi single-instance (memory cache, khô
 | M4 | Quality & ops | ✅ Hoàn thành |
 | M5 | Vận hành thật & HA | ✅ Hoàn thành |
 | M6 | Đào sâu chuẩn OAuth/OIDC | ✅ Hoàn thành |
-| M7 | Policy engine v2 | ⬜ Chưa bắt đầu |
+| M7 | Policy engine v2 | ✅ Hoàn thành |
 | M8 | DX & hệ sinh thái | ⬜ Chưa bắt đầu |
 
 > Library primitives (PKCE, RAR, Token Exchange, providers, middleware, telemetry, devkit) **đã production-ready**. Token Exchange/mTLS binding đã có lib primitives — M6 chỉ là wiring vào gateway.

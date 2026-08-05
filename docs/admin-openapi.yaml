@@ -1,0 +1,153 @@
+openapi: "3.0.3"
+info:
+  title: common-iam Admin API
+  description: >
+    Runtime administration for the IAM gateway: tenant listing, policy
+    inspection, hot-reload with versioning and rollback. All endpoints
+    (except /admin/ui) require `Authorization: Bearer <IAM_ADMIN_TOKEN>`
+    when an admin token is configured.
+  version: "2.0"
+servers:
+  - url: /admin
+security:
+  - bearerAuth: []
+paths:
+  /tenants:
+    get:
+      summary: List registered tenant IDs
+      responses:
+        "200":
+          description: Tenant list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tenants: { type: array, items: { type: string } }
+                  count: { type: integer }
+  /policies:
+    get:
+      summary: Full policy configuration as JSON
+      responses:
+        "200":
+          description: The active policy configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PolicyConfig" }
+  /policy/summary:
+    get:
+      summary: Human-readable policy summary
+      responses:
+        "200":
+          description: Summary text
+  /policy/reload:
+    post:
+      summary: Replace the active policy configuration
+      description: >
+        Uploads a new policy YAML. The revision is recorded in the version
+        history (last 10 kept) for rollback.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [yaml]
+              properties:
+                yaml: { type: string, description: "Policy YAML document" }
+      responses:
+        "200": { description: Reloaded }
+        "400": { description: Invalid YAML }
+  /policy/versions:
+    get:
+      summary: List API-uploaded policy revisions
+      responses:
+        "200":
+          description: Revision history (most recent last)
+  /policy/rollback:
+    post:
+      summary: Revert to the previous API-uploaded revision
+      responses:
+        "200": { description: Rolled back }
+        "409": { description: No previous version available }
+  /reload:
+    post:
+      summary: Re-read policy file and tenant configuration from disk
+      description: Same effect as sending SIGHUP to the process.
+      responses:
+        "200": { description: Reloaded }
+        "500": { description: Reload failed }
+        "501": { description: Reload not configured }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    PolicyConfig:
+      type: object
+      properties:
+        version: { type: string }
+        realm: { type: string }
+        acr_levels:
+          type: array
+          items: { type: string }
+        policies:
+          type: array
+          items: { $ref: "#/components/schemas/Policy" }
+    Policy:
+      type: object
+      required: [name, resources]
+      properties:
+        name: { type: string }
+        resources:
+          type: array
+          items: { type: string }
+          description: Glob patterns; `**` matches whole path segments only
+        methods:
+          type: array
+          items: { type: string }
+        effect:
+          type: string
+          enum: [allow, deny]
+          description: A matched deny policy rejects outright (default allow)
+        priority:
+          type: integer
+          description: Higher evaluates first; file order within equal priority
+        tenants:
+          type: array
+          items: { type: string }
+          description: Restrict the policy to these tenant IDs (empty = all)
+        require_acr: { type: string }
+        max_age: { type: integer, description: Max auth age in seconds }
+        require_mfa: { type: boolean }
+        require_scopes:
+          type: array
+          items: { type: string }
+        require_roles:
+          type: array
+          items: { type: string }
+        require_audience:
+          type: array
+          items: { type: string }
+          description: RFC 8707 — token aud must contain every value
+        when:
+          type: object
+          description: Match conditions; non-matching policies fall through
+          properties:
+            ip_cidr:
+              type: array
+              items: { type: string }
+            time_window:
+              type: object
+              properties:
+                start: { type: string, example: "08:00" }
+                end: { type: string, example: "18:00" }
+                days:
+                  type: array
+                  items: { type: string, example: mon }
+                tz: { type: string, example: Asia/Ho_Chi_Minh }
+            headers:
+              type: object
+              additionalProperties: { type: string }
+        enabled: { type: boolean }

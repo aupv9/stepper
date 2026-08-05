@@ -222,3 +222,94 @@ policies:
     require_mfa: true
     require_scopes: [openid, admin]
 ```
+
+## Policy engine v2
+
+### Effect & priority
+
+```yaml
+policies:
+  - name: block-legacy          # deny wins regardless of file position
+    effect: deny                 # "allow" (default) | "deny"
+    priority: 100                # higher evaluates first; file order breaks ties
+    resources: ["/api/legacy/**"]
+    enabled: true
+```
+
+A matched `deny` policy rejects the request outright — `require_*` fields are
+not evaluated for deny rules.
+
+### Tenant-scoped policies
+
+```yaml
+  - name: acme-admins
+    tenants: ["acme"]            # applies only when the resolved tenant matches
+    resources: ["/admin/**"]
+    require_roles: ["admin"]     # token must carry every listed role
+    enabled: true
+```
+
+### Match conditions (`when`)
+
+Conditions are part of *matching*, not requirements: a policy whose `when`
+clause doesn't match simply falls through to the next policy.
+
+```yaml
+  - name: office-hours-only
+    resources: ["/internal/**"]
+    when:
+      ip_cidr: ["10.0.0.0/8", "192.168.1.5"]   # CIDRs or bare IPs
+      time_window:
+        start: "08:00"
+        end: "18:00"
+        days: [mon, tue, wed, thu, fri]
+        tz: "Asia/Ho_Chi_Minh"                  # IANA zone, default UTC
+      headers:
+        X-Canary: "true"                        # exact value, name case-insensitive
+    enabled: true
+```
+
+### Resource indicators (RFC 8707)
+
+```yaml
+  - name: payments-audience
+    resources: ["/api/payments/**"]
+    require_audience: ["https://payments.example.com"]  # aud must contain all
+    enabled: true
+```
+
+Fails closed: tokens without an `aud` claim are denied by such policies.
+
+### Testing policies in CI
+
+Write a `tests.yaml` and run it with the CLI (non-zero exit on failure):
+
+```yaml
+tests:
+  - name: payments need silver
+    request: {method: POST, path: /api/payments/x, acr: bronze}
+    expect: {allowed: false, policy: payments, reason_contains: ACR}
+  - name: legacy blocked
+    request: {path: /legacy/x}
+    expect: {allowed: false, policy: block-legacy}
+```
+
+```bash
+iam-cli policy-test -policy config/policy.yaml -tests tests.yaml
+```
+
+### External policy decision points
+
+The gateway accepts any implementation of `policy.Evaluator`, so a CEL
+evaluator or an OPA sidecar client can replace the built-in YAML engine
+without touching the guard:
+
+```go
+guard := gateway.NewGuard(gateway.GuardConfig{
+    PolicyEngine: myOPAAdapter{},   // implements policy.Evaluator
+    // ...
+})
+```
+
+The full Admin API (policy CRUD, versions, rollback) is described in
+[`admin-openapi.yaml`](admin-openapi.yaml).

@@ -3,8 +3,11 @@ package admin
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/common-iam/iam/pkg/core/policy"
 	"github.com/common-iam/iam/pkg/tenant"
@@ -32,7 +35,20 @@ type Handler struct {
 	adminToken string
 	reloadFunc func() error
 	mux        *http.ServeMux
+
+	// Policy version history for API-driven reloads (rollback support).
+	mu       sync.Mutex
+	versions []policyVersion
 }
+
+// policyVersion is one API-uploaded policy revision.
+type policyVersion struct {
+	YAML       string    `json:"-"`
+	UploadedAt time.Time `json:"uploaded_at"`
+	Summary    string    `json:"summary"`
+}
+
+const maxPolicyVersions = 10
 
 // New creates an Admin API handler.
 func New(cfg Config) *Handler {
@@ -71,9 +87,72 @@ func (h *Handler) checkBearer(r *http.Request) bool {
 
 func (h *Handler) routes() {
 	h.mux.HandleFunc("/tenants", h.handleTenants)
+	h.mux.HandleFunc("/policies", h.handlePolicies)
 	h.mux.HandleFunc("/policy/summary", h.handlePolicySummary)
 	h.mux.HandleFunc("/policy/reload", h.handlePolicyReload)
+	h.mux.HandleFunc("/policy/versions", h.handlePolicyVersions)
+	h.mux.HandleFunc("/policy/rollback", h.handlePolicyRollback)
 	h.mux.HandleFunc("/reload", h.handleReload)
+}
+
+// GET /admin/policies — full policy configuration as JSON
+func (h *Handler) handlePolicies(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cfg := h.engine.Config()
+	if cfg == nil {
+		writeJSON(w, map[string]interface{}{"policies": []struct{}{}})
+		return
+	}
+	writeJSON(w, cfg)
+}
+
+// GET /admin/policy/versions — API-uploaded policy revision history
+func (h *Handler) handlePolicyVersions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	h.mu.Lock()
+	out := make([]policyVersion, len(h.versions))
+	copy(out, h.versions)
+	h.mu.Unlock()
+	writeJSON(w, map[string]interface{}{
+		"count":    len(out),
+		"versions": out,
+	})
+}
+
+// POST /admin/policy/rollback — revert to the previous API-uploaded revision
+func (h *Handler) handlePolicyRollback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	h.mu.Lock()
+	if len(h.versions) < 2 {
+		h.mu.Unlock()
+		http.Error(w, `{"error":"no previous version to roll back to"}`, http.StatusConflict)
+		return
+	}
+	// Drop the current version; the previous one becomes active.
+	h.versions = h.versions[:len(h.versions)-1]
+	target := h.versions[len(h.versions)-1]
+	h.mu.Unlock()
+
+	cfg, err := policy.LoadFromBytes([]byte(target.YAML))
+	if err != nil {
+		http.Error(w, `{"error":"stored version no longer parses: `+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	h.engine.Reload(cfg)
+	writeJSON(w, map[string]interface{}{
+		"status":      "rolled back",
+		"uploaded_at": target.UploadedAt,
+		"summary":     h.engine.Summary(),
+	})
 }
 
 // POST /admin/reload — re-read policy + tenant config from disk (same as SIGHUP)
@@ -140,6 +219,19 @@ func (h *Handler) handlePolicyReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.engine.Reload(cfg)
+
+	// Record the revision for rollback.
+	h.mu.Lock()
+	h.versions = append(h.versions, policyVersion{
+		YAML:       body.YAML,
+		UploadedAt: time.Now(),
+		Summary:    fmt.Sprintf("policies=%d realm=%s", len(cfg.Policies), cfg.Realm),
+	})
+	if len(h.versions) > maxPolicyVersions {
+		h.versions = h.versions[len(h.versions)-maxPolicyVersions:]
+	}
+	h.mu.Unlock()
+
 	writeJSON(w, map[string]interface{}{
 		"status":  "reloaded",
 		"summary": h.engine.Summary(),
