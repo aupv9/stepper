@@ -71,6 +71,71 @@ Không có `cmd/`, gateway mode trong README/CLAUDE.md không thể build. Đây
 
 ---
 
+# Giai đoạn 2 — Từ "production-ready" thành "production-grade at scale"
+
+Giai đoạn 1 (M1–M4) đã xong: gateway an toàn, chạy standalone, có CI. Giai đoạn 2 tập trung
+**vận hành thật ở scale** (HA, TLS, config), **đào sâu chuẩn** (RFC 8693/8705, local JWT mode),
+**policy engine v2**, và **DX/hệ sinh thái**.
+
+Nguyên tắc ưu tiên giữ nguyên: những gì chặn deploy thật trước, tính năng mới sau.
+
+---
+
+## 🔴 Milestone 5 — Vận hành thật & HA (chặn deploy multi-instance)
+
+Hiện `iam-service` chỉ chạy đúng khi single-instance (memory cache, không TLS, config toàn env).
+
+- [ ] **TLS termination** — `internal/server`: `IAM_TLS_CERT_FILE`/`IAM_TLS_KEY_FILE` → `ListenAndServeTLS`; bật `Secure` cho step-up cookie khi có TLS; tùy chọn mTLS client-cert (`IAM_TLS_CLIENT_CA`) làm nền cho RFC 8705 ở M6.
+- [ ] **Wire Redis vào service** — `IAM_REDIS_ADDR` → `goredis` adapter cho: token cache, DPoP jti replay cache, revocation index. Không có Redis + nhiều replica = revocation/replay-protection chỉ có hiệu lực per-instance (phải log warning).
+- [ ] **Config file đa tenant** — `iam.yaml`: danh sách tenants (mỗi tenant: provider type, discovery URL, client credentials, resolver rules), thay cho single-tenant-qua-env. Env vẫn override được. Schema validate khi boot.
+- [ ] **Hot-reload** — file watcher (hoặc SIGHUP) cho policy file + tenant config; đã có `POST /admin/policy/reload`, thêm reload tenants.
+- [ ] **Distributed rate limiting** — limiter hiện tại là in-memory per-instance; thêm biến thể Redis (INCR + EXPIRE hoặc sliding window) khi có `IAM_REDIS_ADDR`.
+- [ ] **Readiness tách khỏi liveness** — `/health/live` (process ok) vs `/health/ready` (AS discovery + Redis reachable); K8s probe được đúng.
+
+**Exit criteria:** 2 replica iam-service sau LB chia sẻ revocation + DPoP replay state qua Redis; boot từ `iam.yaml` với ≥2 tenants; chạy TLS end-to-end trong docker-compose.
+
+---
+
+## 🟠 Milestone 6 — Đào sâu chuẩn OAuth/OIDC
+
+- [ ] **Local JWT validation mode** — per-tenant option dùng `JWTValidator` (JWKS) thay introspection round-trip; bắt buộc set `ExpectedIssuer`/`ExpectedAudience`; fallback introspection cho opaque token. Trade-off revocation-lag phải document.
+- [ ] **Wire Token Exchange (RFC 8693)** — lib `pkg/core/tokenexchange` đã có `Client.Exchange`; thêm endpoint `/token/exchange` ở gateway (delegation/impersonation có policy gate: scope `token:exchange` + audit event riêng).
+- [ ] **mTLS sender-constrained tokens (RFC 8705)** — verify `cnf.x5t#S256` với client cert từ TLS handshake, là alternative cho DPoP; `fapi.ValidateTokenBinding` đã có sẵn hook `allowMTLS`.
+- [ ] **OIDC Back-Channel Logout** — parse logout token (JWT, event `http://schemas.openid.net/event/backchannel-logout`) trên `/webhook/revoke`, map `sid`/`sub` vào revocation index hiện có.
+- [ ] **Resource Indicators (RFC 8707)** — policy per-resource `aud` check: request tới upstream X yêu cầu token có `aud` chứa X.
+- [ ] **JWKS rotation hardening** — refresh theo `Cache-Control`, retry với backoff, metric `iam_jwks_refresh_failures_total`.
+
+**Exit criteria:** rfc-compliance audit pass cho RFC 8693/8705/8707 + back-channel logout; local-JWT mode đo được p99 < 1ms trên benchmark.
+
+---
+
+## 🟡 Milestone 7 — Policy engine v2
+
+- [ ] **Điều kiện mở rộng** — `require_roles`, IP CIDR allowlist/denylist, time-window (giờ làm việc), match theo request header.
+- [ ] **Tenant-scoped policies** — policy có field `tenants: [...]`; engine nhận `TenantID` trong `PolicyRequest`.
+- [ ] **Explicit deny + priority** — rule `effect: deny` thắng allow; sort theo `priority` thay vì thứ tự file.
+- [ ] **Policy test framework** — `iam-cli policy-test <policy.yaml> <tests.yaml>`: bảng test case (request → expected) chạy trong CI của người dùng; xuất diff khi đổi policy.
+- [ ] **Plugin interface cho external PDP** — interface `Evaluator` để cắm CEL expression hoặc OPA sidecar mà không đổi guard.
+- [ ] **Admin API v2** — CRUD policy qua API (hiện chỉ reload cả file), version + rollback, OpenAPI spec.
+
+**Exit criteria:** policy có deny/priority/tenant-scope chạy đúng bộ policy-test; simulator + CLI hỗ trợ đủ field mới.
+
+---
+
+## 🟢 Milestone 8 — DX & hệ sinh thái
+
+- [ ] **Quickstart docker-compose thật** — gateway + Keycloak + demo upstream + Grafana/Prometheus; README walkthrough 5 phút.
+- [ ] **Helm chart / K8s manifests** — deployment (sidecar mode + gateway mode), HPA, probes từ M5.
+- [ ] **Grafana dashboard JSON** — introspection latency, cache hit ratio, step-up rate, policy denials, rate-limit drops.
+- [ ] **Audit sink mở rộng** — file rotation, webhook sink, ví dụ Kafka producer; schema audit event version hóa.
+- [ ] **Middleware bổ sung** — `chi`, `fiber` adapter (theo pattern gin/echo, ~thin wrapper); streaming interceptor cho gRPC.
+- [ ] **Load test harness** — k6 script + make target `make loadtest`; ngưỡng p99 làm gate CI (nightly, không chặn PR).
+- [ ] **Docs giai đoạn 2** — `docs/deployment.md` update (TLS/Redis/multi-tenant config), `docs/token-exchange.md`, `docs/policy-v2.md`.
+
+**Exit criteria:** người mới clone repo → chạy quickstart → thấy step-up flow hoạt động trong <10 phút; chart deploy được lên kind/minikube.
+
+---
+
 ## Trạng thái nhanh
 
 | Milestone | Nội dung | Trạng thái |
@@ -79,5 +144,9 @@ Không có `cmd/`, gateway mode trong README/CLAUDE.md không thể build. Đây
 | M2 | Standalone binaries | ✅ Hoàn thành |
 | M3 | Hardening & RFC gaps | ✅ Hoàn thành |
 | M4 | Quality & ops | ✅ Hoàn thành |
+| M5 | Vận hành thật & HA | ⬜ Chưa bắt đầu |
+| M6 | Đào sâu chuẩn OAuth/OIDC | ⬜ Chưa bắt đầu |
+| M7 | Policy engine v2 | ⬜ Chưa bắt đầu |
+| M8 | DX & hệ sinh thái | ⬜ Chưa bắt đầu |
 
-> Library primitives (PKCE, RAR, Token Exchange, providers, middleware, telemetry, devkit) **đã production-ready** và không nằm trong critical path của các milestone trên.
+> Library primitives (PKCE, RAR, Token Exchange, providers, middleware, telemetry, devkit) **đã production-ready**. Token Exchange/mTLS binding đã có lib primitives — M6 chỉ là wiring vào gateway.
