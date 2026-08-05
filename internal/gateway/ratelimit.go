@@ -1,11 +1,57 @@
 package gateway
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 )
+
+// RateCounter is the minimal atomic-counter interface needed for distributed
+// rate limiting. *goredis.Adapter implements it (Redis INCR + EXPIRE).
+type RateCounter interface {
+	// Incr increments key and returns the new value; the key must expire
+	// after window from its first increment.
+	Incr(ctx context.Context, key string, window time.Duration) (int64, error)
+}
+
+// limiter is the guard-facing abstraction over local and distributed limiters.
+type limiter interface {
+	allowRequest(r *http.Request) bool
+}
+
+// distributedRateLimiter is a fixed-window limiter shared across instances
+// via a RateCounter. Each client IP gets max(burst, rps) requests per
+// one-second window. It fails open on counter errors: an unreachable Redis
+// must not take down the data path (the local limiter can still be layered
+// at the edge).
+type distributedRateLimiter struct {
+	counter RateCounter
+	limit   int64
+}
+
+func newDistributedRateLimiter(counter RateCounter, rps float64, burst int) *distributedRateLimiter {
+	limit := int64(rps)
+	if int64(burst) > limit {
+		limit = int64(burst)
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	return &distributedRateLimiter{counter: counter, limit: limit}
+}
+
+func (d *distributedRateLimiter) allowRequest(r *http.Request) bool {
+	window := time.Now().Unix()
+	key := fmt.Sprintf("iam:rl:%s:%d", clientKey(r), window)
+	n, err := d.counter.Incr(r.Context(), key, 2*time.Second)
+	if err != nil {
+		return true // fail open — see type comment
+	}
+	return n <= d.limit
+}
 
 // rateLimiter is a per-key token-bucket rate limiter (no external deps).
 // Buckets refill at rps tokens/second up to burst; a request consumes one
@@ -37,6 +83,10 @@ func newRateLimiter(rps float64, burst int) *rateLimiter {
 	}
 	go rl.cleanupLoop()
 	return rl
+}
+
+func (rl *rateLimiter) allowRequest(r *http.Request) bool {
+	return rl.allow(clientKey(r))
 }
 
 // allow reports whether the request identified by key may proceed.

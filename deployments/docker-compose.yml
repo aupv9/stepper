@@ -12,8 +12,18 @@ services:
       IAM_POLICY_FILE: "/app/config/policy.yaml"
       IAM_REALM: "MyApp"
       IAM_UPSTREAM_URL: "http://backend:3000"
+      # Shared cache: required when scaling beyond one replica — carries the
+      # token cache, DPoP replay protection, revocation index & rate limits.
+      IAM_REDIS_ADDR: "redis:6379"
+      # Multi-tenant/TLS config file (see config/iam.example.yaml):
+      # IAM_CONFIG_FILE: "/app/config/iam.yaml"
+      # TLS termination:
+      # IAM_TLS_CERT_FILE: "/app/tls/server.crt"
+      # IAM_TLS_KEY_FILE: "/app/tls/server.key"
     volumes:
       - ../config/policy.example.yaml:/app/config/policy.yaml:ro
+      # - ../config/iam.yaml:/app/config/iam.yaml:ro
+      # - ./tls:/app/tls:ro
     depends_on:
       - redis
     networks:

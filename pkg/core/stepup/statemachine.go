@@ -164,7 +164,8 @@ func FlowStateFromContext(ctx context.Context) (*FlowState, bool) {
 // The cookie survives the redirect to the AS and back, letting the guard replay the
 // original request once the new token satisfies the required ACR.
 // signingKey should be a random secret shared across service instances (e.g. IAM_COOKIE_SECRET).
-func SetStateCookie(w http.ResponseWriter, saved *SavedRequest, signingKey string) error {
+// secure marks the cookie Secure — pass true whenever the request arrived over TLS.
+func SetStateCookie(w http.ResponseWriter, saved *SavedRequest, signingKey string, secure bool) error {
 	payload, err := saved.Encode()
 	if err != nil {
 		return fmt.Errorf("encoding saved request: %w", err)
@@ -180,8 +181,8 @@ func SetStateCookie(w http.ResponseWriter, saved *SavedRequest, signingKey strin
 		MaxAge:   cookieMaxAge,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
-		// Secure is enforced by the caller (set to true in production via TLS).
 	})
 	return nil
 }

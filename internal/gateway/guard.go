@@ -38,7 +38,7 @@ type Guard struct {
 	webhookSecret string
 	cookieSecret  string
 	fapiCfg       *fapi.ValidationConfig
-	limiter       *rateLimiter
+	limiter       limiter
 }
 
 // GuardConfig holds Guard dependencies.
@@ -86,6 +86,11 @@ type GuardConfig struct {
 
 	// RateLimitBurst is the bucket size (default: RateLimitRPS, minimum 1).
 	RateLimitBurst int
+
+	// RateCounter, when set together with RateLimitRPS, switches to a
+	// distributed fixed-window limiter shared across instances (e.g. Redis
+	// via goredis.Adapter). When nil, an in-memory per-instance limiter is used.
+	RateCounter RateCounter
 }
 
 // NewGuard creates a ResourceServerGuard.
@@ -110,7 +115,11 @@ func NewGuard(cfg GuardConfig) *Guard {
 		fapiCfg:       cfg.FAPI,
 	}
 	if cfg.RateLimitRPS > 0 {
-		g.limiter = newRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst)
+		if cfg.RateCounter != nil {
+			g.limiter = newDistributedRateLimiter(cfg.RateCounter, cfg.RateLimitRPS, cfg.RateLimitBurst)
+		} else {
+			g.limiter = newRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst)
+		}
 	}
 	if cfg.EnableDPoP {
 		dpopCfg := token.DefaultDPoPConfig()
@@ -132,7 +141,7 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 
 	// 0. Rate limiting (pre-auth, keyed by client IP).
-	if g.limiter != nil && !g.limiter.allow(clientKey(r)) {
+	if g.limiter != nil && !g.limiter.allowRequest(r) {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
@@ -417,7 +426,7 @@ func (g *Guard) handleDenial(ctx context.Context, w http.ResponseWriter, r *http
 	// Persist the original request in a signed cookie so it can be replayed
 	// automatically once the client obtains a higher-assurance token.
 	if g.cookieSecret != "" && flow != nil {
-		stepup.SetStateCookie(w, flow.SavedRequest, g.cookieSecret) //nolint:errcheck
+		stepup.SetStateCookie(w, flow.SavedRequest, g.cookieSecret, r.TLS != nil) //nolint:errcheck
 	}
 
 	challenge.WriteChallenge(w)

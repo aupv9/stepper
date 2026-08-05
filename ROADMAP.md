@@ -85,12 +85,12 @@ Nguyên tắc ưu tiên giữ nguyên: những gì chặn deploy thật trước
 
 Hiện `iam-service` chỉ chạy đúng khi single-instance (memory cache, không TLS, config toàn env).
 
-- [ ] **TLS termination** — `internal/server`: `IAM_TLS_CERT_FILE`/`IAM_TLS_KEY_FILE` → `ListenAndServeTLS`; bật `Secure` cho step-up cookie khi có TLS; tùy chọn mTLS client-cert (`IAM_TLS_CLIENT_CA`) làm nền cho RFC 8705 ở M6.
-- [ ] **Wire Redis vào service** — `IAM_REDIS_ADDR` → `goredis` adapter cho: token cache, DPoP jti replay cache, revocation index. Không có Redis + nhiều replica = revocation/replay-protection chỉ có hiệu lực per-instance (phải log warning).
-- [ ] **Config file đa tenant** — `iam.yaml`: danh sách tenants (mỗi tenant: provider type, discovery URL, client credentials, resolver rules), thay cho single-tenant-qua-env. Env vẫn override được. Schema validate khi boot.
-- [ ] **Hot-reload** — file watcher (hoặc SIGHUP) cho policy file + tenant config; đã có `POST /admin/policy/reload`, thêm reload tenants.
-- [ ] **Distributed rate limiting** — limiter hiện tại là in-memory per-instance; thêm biến thể Redis (INCR + EXPIRE hoặc sliding window) khi có `IAM_REDIS_ADDR`.
-- [ ] **Readiness tách khỏi liveness** — `/health/live` (process ok) vs `/health/ready` (AS discovery + Redis reachable); K8s probe được đúng.
+- [x] **TLS termination** — `internal/server`: `IAM_TLS_CERT_FILE`/`IAM_TLS_KEY_FILE` → `ListenAndServeTLS`; bật `Secure` cho step-up cookie khi có TLS; tùy chọn mTLS client-cert (`IAM_TLS_CLIENT_CA`) làm nền cho RFC 8705 ở M6.
+- [x] **Wire Redis vào service** — `IAM_REDIS_ADDR` → `goredis` adapter cho: token cache, DPoP jti replay cache, revocation index. Không có Redis + nhiều replica = revocation/replay-protection chỉ có hiệu lực per-instance (phải log warning).
+- [x] **Config file đa tenant** — `iam.yaml`: danh sách tenants (mỗi tenant: provider type, discovery URL, client credentials, resolver rules), thay cho single-tenant-qua-env. Env vẫn override được. Schema validate khi boot.
+- [x] **Hot-reload** — file watcher (hoặc SIGHUP) cho policy file + tenant config; đã có `POST /admin/policy/reload`, thêm reload tenants.
+- [x] **Distributed rate limiting** — limiter hiện tại là in-memory per-instance; thêm biến thể Redis (INCR + EXPIRE hoặc sliding window) khi có `IAM_REDIS_ADDR`.
+- [x] **Readiness tách khỏi liveness** — `/health/live` (process ok) vs `/health/ready` (AS discovery + Redis reachable); K8s probe được đúng.
 
 **Exit criteria:** 2 replica iam-service sau LB chia sẻ revocation + DPoP replay state qua Redis; boot từ `iam.yaml` với ≥2 tenants; chạy TLS end-to-end trong docker-compose.
 
@@ -144,7 +144,7 @@ Hiện `iam-service` chỉ chạy đúng khi single-instance (memory cache, khô
 | M2 | Standalone binaries | ✅ Hoàn thành |
 | M3 | Hardening & RFC gaps | ✅ Hoàn thành |
 | M4 | Quality & ops | ✅ Hoàn thành |
-| M5 | Vận hành thật & HA | ⬜ Chưa bắt đầu |
+| M5 | Vận hành thật & HA | ✅ Hoàn thành |
 | M6 | Đào sâu chuẩn OAuth/OIDC | ⬜ Chưa bắt đầu |
 | M7 | Policy engine v2 | ⬜ Chưa bắt đầu |
 | M8 | DX & hệ sinh thái | ⬜ Chưa bắt đầu |

@@ -40,7 +40,10 @@ func TestNew_PropagatesConfig(t *testing.T) {
 		IdleTimeout:  3 * time.Second,
 	}
 	handler := http.NewServeMux()
-	s := New(handler, cfg)
+	s, err := New(handler, cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	if s == nil {
 		t.Fatal("New returned nil")
@@ -95,7 +98,10 @@ func TestServer_StartServeShutdown(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("served"))
 	})
-	s := New(handler, Config{Addr: addr})
+	s, err := New(handler, Config{Addr: addr})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	// Start blocks until the server stops, so run it in a goroutine and capture
 	// its terminal error.
@@ -153,7 +159,10 @@ func TestServer_StartServeShutdown(t *testing.T) {
 // TestServer_ShutdownBeforeStart verifies Shutdown is safe to call on a server
 // that was never started: net/http returns nil in that case.
 func TestServer_ShutdownBeforeStart(t *testing.T) {
-	s := New(http.NewServeMux(), Config{Addr: "127.0.0.1:0"})
+	s, err := New(http.NewServeMux(), Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := s.Shutdown(ctx); err != nil {

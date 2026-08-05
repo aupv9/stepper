@@ -19,6 +19,10 @@ type Config struct {
 	// "Authorization: Bearer <AdminToken>". Leave empty to allow unauthenticated
 	// access (suitable for dev/local environments).
 	AdminToken string
+
+	// ReloadFunc, when set, backs POST /admin/reload: it re-reads the policy
+	// file and tenant configuration from disk (same effect as SIGHUP).
+	ReloadFunc func() error
 }
 
 // Handler provides the Admin REST API for managing policies and tenants at runtime.
@@ -26,6 +30,7 @@ type Handler struct {
 	registry   *tenant.Registry
 	engine     *policy.Engine
 	adminToken string
+	reloadFunc func() error
 	mux        *http.ServeMux
 }
 
@@ -35,6 +40,7 @@ func New(cfg Config) *Handler {
 		registry:   cfg.Registry,
 		engine:     cfg.Engine,
 		adminToken: cfg.AdminToken,
+		reloadFunc: cfg.ReloadFunc,
 		mux:        http.NewServeMux(),
 	}
 	h.routes()
@@ -67,6 +73,28 @@ func (h *Handler) routes() {
 	h.mux.HandleFunc("/tenants", h.handleTenants)
 	h.mux.HandleFunc("/policy/summary", h.handlePolicySummary)
 	h.mux.HandleFunc("/policy/reload", h.handlePolicyReload)
+	h.mux.HandleFunc("/reload", h.handleReload)
+}
+
+// POST /admin/reload — re-read policy + tenant config from disk (same as SIGHUP)
+func (h *Handler) handleReload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.reloadFunc == nil {
+		http.Error(w, `{"error":"reload not configured"}`, http.StatusNotImplemented)
+		return
+	}
+	if err := h.reloadFunc(); err != nil {
+		http.Error(w, `{"error":"reload failed: `+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"status":  "reloaded",
+		"tenants": h.registry.List(),
+		"summary": h.engine.Summary(),
+	})
 }
 
 // GET /admin/tenants — list registered tenants

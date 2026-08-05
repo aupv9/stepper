@@ -573,7 +573,7 @@ func TestStateCookie_RoundTrip(t *testing.T) {
 	rec := httptest.NewRecorder()
 	saved := newSavedRequest()
 
-	if err := SetStateCookie(rec, saved, testSecret); err != nil {
+	if err := SetStateCookie(rec, saved, testSecret, false); err != nil {
 		t.Fatalf("SetStateCookie: %v", err)
 	}
 
@@ -602,7 +602,7 @@ func TestStateCookie_RoundTrip(t *testing.T) {
 
 func TestStateCookie_Attributes(t *testing.T) {
 	rec := httptest.NewRecorder()
-	if err := SetStateCookie(rec, newSavedRequest(), testSecret); err != nil {
+	if err := SetStateCookie(rec, newSavedRequest(), testSecret, false); err != nil {
 		t.Fatalf("SetStateCookie: %v", err)
 	}
 	cookies := rec.Result().Cookies()
@@ -659,7 +659,7 @@ func TestReadStateCookie_Malformed(t *testing.T) {
 
 func TestReadStateCookie_TamperedSignature(t *testing.T) {
 	rec := httptest.NewRecorder()
-	if err := SetStateCookie(rec, newSavedRequest(), testSecret); err != nil {
+	if err := SetStateCookie(rec, newSavedRequest(), testSecret, false); err != nil {
 		t.Fatalf("SetStateCookie: %v", err)
 	}
 	c := rec.Result().Cookies()[0]
@@ -679,7 +679,7 @@ func TestReadStateCookie_TamperedSignature(t *testing.T) {
 
 func TestReadStateCookie_TamperedPayload(t *testing.T) {
 	rec := httptest.NewRecorder()
-	if err := SetStateCookie(rec, newSavedRequest(), testSecret); err != nil {
+	if err := SetStateCookie(rec, newSavedRequest(), testSecret, false); err != nil {
 		t.Fatalf("SetStateCookie: %v", err)
 	}
 	c := rec.Result().Cookies()[0]
@@ -705,7 +705,7 @@ func TestReadStateCookie_TamperedPayload(t *testing.T) {
 
 func TestReadStateCookie_WrongSecret(t *testing.T) {
 	rec := httptest.NewRecorder()
-	if err := SetStateCookie(rec, newSavedRequest(), testSecret); err != nil {
+	if err := SetStateCookie(rec, newSavedRequest(), testSecret, false); err != nil {
 		t.Fatalf("SetStateCookie: %v", err)
 	}
 	c := rec.Result().Cookies()[0]
@@ -724,7 +724,7 @@ func TestReadStateCookie_Expired(t *testing.T) {
 	rec := httptest.NewRecorder()
 	stale := newSavedRequest()
 	stale.SavedAt = time.Now().Add(-(cookieMaxAge + 60) * time.Second)
-	if err := SetStateCookie(rec, stale, testSecret); err != nil {
+	if err := SetStateCookie(rec, stale, testSecret, false); err != nil {
 		t.Fatalf("SetStateCookie: %v", err)
 	}
 	c := rec.Result().Cookies()[0]

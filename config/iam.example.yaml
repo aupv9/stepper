@@ -1,0 +1,81 @@
+# iam-service configuration example.
+# Load with: IAM_CONFIG_FILE=config/iam.example.yaml ./iam-service
+# Every field can be overridden by IAM_* environment variables (env wins).
+
+addr: ":8080"
+realm: "IAM"
+policy_file: "config/policy.example.yaml"
+log_format: "json"
+
+# Proxy target; omit for echo mode (useful for testing).
+# upstream_url: "http://backend:3000"
+
+default_tenant: "default"
+
+# Protect /admin/* with a bearer token (strongly recommended outside dev).
+# admin_token: "change-me"
+
+# HMAC secret for /webhook/revoke signatures.
+# webhook_secret: "change-me"
+
+# Signing secret for the RFC 9470 step-up state cookie.
+# cookie_secret: "change-me"
+
+# TLS termination. cert_file + key_file enable HTTPS; client_ca_file
+# additionally enables optional mTLS client certificates.
+# tls:
+#   cert_file: "/etc/iam/tls/server.crt"
+#   key_file: "/etc/iam/tls/server.key"
+#   client_ca_file: "/etc/iam/tls/clients-ca.crt"
+
+# Redis: REQUIRED when running more than one replica — shares the token
+# cache, DPoP jti replay protection, revocation index, and rate limits.
+# redis:
+#   addr: "redis:6379"
+#   password: ""
+#   db: 0
+
+# Per-client-IP rate limiting (distributed automatically when Redis is set).
+# rate_limit:
+#   rps: 100
+#   burst: 200
+
+# RFC 9449 DPoP proof-of-possession enforcement.
+# dpop:
+#   enabled: true
+#   nonce_secret: "change-me"   # enables server-issued nonces (RFC 9449 §8)
+
+# FAPI 2.0 Security Profile enforcement.
+# enable_fapi: false
+
+# Tenants: one provider per tenant. Empty list = LocalAS dev mode.
+tenants: []
+#  - id: "acme"
+#    provider: "keycloak"
+#    base_url: "https://keycloak.example.com"
+#    realm: "acme"
+#    client_id: "iam-gateway"
+#    client_secret: "..."
+#  - id: "bravo"
+#    provider: "auth0"
+#    domain: "bravo.us.auth0.com"
+#    audience: "https://api.bravo.example"
+#    client_id: "..."
+#    client_secret: "..."
+#  - id: "charlie"
+#    provider: "generic"
+#    discovery_url: "https://sso.charlie.example/.well-known/openid-configuration"
+#    client_id: "..."
+#    client_secret: "..."
+
+# Tenant resolution chain, tried in order. Empty = header X-Tenant-ID
+# followed by static default_tenant.
+resolvers: []
+#  - type: "header"
+#    header: "X-Tenant-ID"
+#  - type: "subdomain"
+#    base_domain: "api.example.com"
+#  - type: "path"
+#    segment: 0
+#  - type: "static"          # single-tenant opt-in fallback
+#    tenant: "default"

@@ -101,6 +101,16 @@ func (s *Server) IssueToken(opts tokenfactory.TokenOptions) (string, error) {
 	return raw, nil
 }
 
+// Revoke marks an issued token as revoked (introspection returns active:false).
+// Programmatic equivalent of POST /revoke.
+func (s *Server) Revoke(rawToken string) {
+	s.mu.Lock()
+	if entry, ok := s.tokens[rawToken]; ok {
+		entry.revoked = true
+	}
+	s.mu.Unlock()
+}
+
 func (s *Server) handleDiscovery(w http.ResponseWriter, _ *http.Request) {
 	base := s.issuer
 	writeJSON(w, map[string]interface{}{
