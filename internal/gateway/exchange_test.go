@@ -76,7 +76,11 @@ func TestExchangeHandler(t *testing.T) {
 
 	t.Run("happy path", func(t *testing.T) {
 		h := newHandler([]string{"openid", gateway.RequiredExchangeScope})
-		rr := post(h, url.Values{"audience": {"downstream-api"}}, "caller-token")
+		rr := post(h, url.Values{
+			"subject_token":      {"caller-token"},
+			"subject_token_type": {"urn:ietf:params:oauth:token-type:access_token"},
+			"audience":           {"downstream-api"},
+		}, "caller-token")
 		if rr.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 		}
@@ -85,6 +89,14 @@ func TestExchangeHandler(t *testing.T) {
 		}
 		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil || resp.AccessToken != "exchanged-token" {
 			t.Errorf("response = %s", rr.Body.String())
+		}
+	})
+
+	t.Run("missing subject_token rejected", func(t *testing.T) {
+		h := newHandler([]string{gateway.RequiredExchangeScope})
+		rr := post(h, url.Values{"audience": {"downstream-api"}}, "caller-token")
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for missing subject_token (RFC 8693 §2.1 REQUIRED), got %d", rr.Code)
 		}
 	})
 

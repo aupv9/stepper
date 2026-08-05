@@ -59,22 +59,23 @@ func NewBackchannelLogoutHandler(registry *tenant.Registry, cache token.Cache, a
 // per OIDC Back-Channel Logout 1.0 §2.5).
 func (h *BackchannelLogoutHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeLogoutError(w, http.StatusMethodNotAllowed, "invalid_request", "method not allowed")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "malformed form body", http.StatusBadRequest)
+		writeLogoutError(w, http.StatusBadRequest, "invalid_request", "malformed form body")
 		return
 	}
 	raw := r.PostFormValue("logout_token")
 	if raw == "" {
-		http.Error(w, "missing logout_token", http.StatusBadRequest)
+		writeLogoutError(w, http.StatusBadRequest, "invalid_request", "missing logout_token")
 		return
 	}
 
 	claims, err := h.validate(r, raw)
 	if err != nil {
-		http.Error(w, "invalid logout token: "+err.Error(), http.StatusBadRequest)
+		// §2.8: error responses use the OAuth error format.
+		writeLogoutError(w, http.StatusBadRequest, "invalid_request", "invalid logout token: "+err.Error())
 		return
 	}
 
@@ -117,8 +118,12 @@ func (h *BackchannelLogoutHandler) validate(r *http.Request, raw string) (*logou
 	}
 
 	// §2.6 checks beyond the signature:
-	if _, ok := claims.Events[backchannelLogoutEvent]; !ok {
+	eventValue, ok := claims.Events[backchannelLogoutEvent]
+	if !ok {
 		return nil, fmt.Errorf("events claim missing %s", backchannelLogoutEvent)
+	}
+	if !isEmptyJSONObject(eventValue) {
+		return nil, fmt.Errorf("events[%s] value must be an empty JSON object", backchannelLogoutEvent)
 	}
 	if claims.Nonce != "" {
 		return nil, fmt.Errorf("logout token must not contain a nonce claim")
@@ -127,6 +132,25 @@ func (h *BackchannelLogoutHandler) validate(r *http.Request, raw string) (*logou
 		return nil, fmt.Errorf("logout token must contain sub or sid")
 	}
 	return claims, nil
+}
+
+// isEmptyJSONObject reports whether raw is `{}` (whitespace tolerated).
+func isEmptyJSONObject(raw json.RawMessage) bool {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return false
+	}
+	return len(m) == 0
+}
+
+func writeLogoutError(w http.ResponseWriter, status int, code, description string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error":             code,
+		"error_description": description,
+	})
 }
 
 // validatorForIssuer finds the registered tenant whose provider issued the
@@ -147,9 +171,17 @@ func (h *BackchannelLogoutHandler) validatorForIssuer(iss string) (*token.JWTVal
 		if !ok || jp.JWKSURL() == "" {
 			return nil, fmt.Errorf("provider for issuer %q exposes no JWKS URL", iss)
 		}
+		// §2.6 step 3: aud must be validated like an ID Token's — it must
+		// contain this RP's client_id. Enforced whenever the provider knows
+		// its client ID (dev setups without one skip the check).
+		expectedAud := ""
+		if cp, ok := p.(interface{ ClientID() string }); ok {
+			expectedAud = cp.ClientID()
+		}
 		v := token.NewJWTValidator(token.JWTValidatorConfig{
-			JWKSURL:        jp.JWKSURL(),
-			ExpectedIssuer: iss,
+			JWKSURL:          jp.JWKSURL(),
+			ExpectedIssuer:   iss,
+			ExpectedAudience: expectedAud,
 		})
 		h.validators[iss] = v
 		return v, nil

@@ -2,7 +2,10 @@ package policy
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -33,6 +36,35 @@ func validate(cfg *Config) error {
 	for i, p := range cfg.Policies {
 		if len(p.Resources) == 0 {
 			return fmt.Errorf("policy[%d] %q: resources must not be empty", i, p.Name)
+		}
+		switch p.Effect {
+		case "", "allow", "deny":
+		default:
+			return fmt.Errorf("policy[%d] %q: unknown effect %q (want allow or deny)", i, p.Name, p.Effect)
+		}
+		if p.When != nil {
+			for _, entry := range p.When.IPCIDR {
+				if strings.Contains(entry, "/") {
+					if _, _, err := net.ParseCIDR(entry); err != nil {
+						return fmt.Errorf("policy[%d] %q: invalid CIDR %q", i, p.Name, entry)
+					}
+				} else if net.ParseIP(entry) == nil {
+					return fmt.Errorf("policy[%d] %q: invalid IP %q", i, p.Name, entry)
+				}
+			}
+			if w := p.When.TimeWindow; w != nil {
+				if _, err := time.Parse("15:04", w.Start); err != nil {
+					return fmt.Errorf("policy[%d] %q: invalid time_window start %q", i, p.Name, w.Start)
+				}
+				if _, err := time.Parse("15:04", w.End); err != nil {
+					return fmt.Errorf("policy[%d] %q: invalid time_window end %q", i, p.Name, w.End)
+				}
+				if w.TZ != "" {
+					if _, err := time.LoadLocation(w.TZ); err != nil {
+						return fmt.Errorf("policy[%d] %q: unknown time zone %q", i, p.Name, w.TZ)
+					}
+				}
+			}
 		}
 	}
 	return nil

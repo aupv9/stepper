@@ -111,6 +111,10 @@ resolvers:
 resolvers:
   - {type: static}
 `},
+		{"jwt validation without audience", `
+tenants:
+  - {id: a, provider: generic, discovery_url: "https://x", validation: jwt}
+`},
 		{"cert without key", `
 tls:
   cert_file: "/x.crt"

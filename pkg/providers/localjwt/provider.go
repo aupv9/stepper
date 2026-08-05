@@ -61,6 +61,22 @@ func (p *Provider) JWKS(ctx context.Context) ([]byte, error) { return p.inner.JW
 // JWKSURL exposes the inner provider's JWKS endpoint (for chaining wrappers).
 func (p *Provider) JWKSURL() string { return p.inner.JWKSURL() }
 
+// ClientID exposes the inner provider's OAuth client ID when it has one.
+func (p *Provider) ClientID() string {
+	if cp, ok := p.inner.(interface{ ClientID() string }); ok {
+		return cp.ClientID()
+	}
+	return ""
+}
+
+// TokenEndpoint exposes the inner provider's token endpoint when it has one.
+func (p *Provider) TokenEndpoint() string {
+	if tp, ok := p.inner.(interface{ TokenEndpoint() string }); ok {
+		return tp.TokenEndpoint()
+	}
+	return ""
+}
+
 // RefreshConfig refreshes the inner provider's discovery document and
 // (re)builds the local validator pinned to the discovered issuer.
 func (p *Provider) RefreshConfig(ctx context.Context) error {

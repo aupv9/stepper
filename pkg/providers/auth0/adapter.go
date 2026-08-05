@@ -51,6 +51,7 @@ func (a *Adapter) Name() string          { return "auth0" }
 func (a *Adapter) Issuer() string        { return a.inner.Issuer() }
 func (a *Adapter) JWKSURL() string       { return a.inner.JWKSURL() }
 func (a *Adapter) TokenEndpoint() string { return a.inner.TokenEndpoint() }
+func (a *Adapter) ClientID() string      { return a.inner.ClientID() }
 
 func (a *Adapter) RefreshConfig(ctx context.Context) error {
 	return a.inner.RefreshConfig(ctx)

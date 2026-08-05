@@ -10,12 +10,18 @@ import (
 
 // Request represents a simulated HTTP request for policy dry-run.
 type Request struct {
-	Method  string
-	Path    string
-	ACR     string
-	AMR     []string
-	Scopes  []string
-	AuthAge time.Duration
+	Method   string
+	Path     string
+	Tenant   string
+	ACR      string
+	AMR      []string
+	Scopes   []string
+	Roles    []string
+	Audience []string
+	AuthAge  time.Duration
+	ClientIP string
+	Headers  map[string]string
+	Now      time.Time
 }
 
 // Result is the simulation outcome.
@@ -40,12 +46,18 @@ func New(engine *policy.Engine) *Simulator {
 // Simulate evaluates the given request against all policies.
 func (s *Simulator) Simulate(req Request) (*Result, error) {
 	result, err := s.engine.Evaluate(&policy.PolicyRequest{
-		Method:      req.Method,
-		Path:        req.Path,
-		TokenACR:    req.ACR,
-		TokenAMR:    req.AMR,
-		TokenScopes: req.Scopes,
-		AuthAge:     req.AuthAge,
+		Method:        req.Method,
+		Path:          req.Path,
+		TenantID:      req.Tenant,
+		TokenACR:      req.ACR,
+		TokenAMR:      req.AMR,
+		TokenScopes:   req.Scopes,
+		TokenRoles:    req.Roles,
+		TokenAudience: req.Audience,
+		AuthAge:       req.AuthAge,
+		ClientIP:      req.ClientIP,
+		Headers:       req.Headers,
+		Now:           req.Now,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("policy evaluation: %w", err)

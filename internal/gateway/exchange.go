@@ -98,13 +98,13 @@ func (h *ExchangeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "malformed form body")
 		return
 	}
+	// RFC 8693 §2.1: subject_token and subject_token_type are REQUIRED.
 	subjectToken := r.PostFormValue("subject_token")
 	subjectTokenType := r.PostFormValue("subject_token_type")
-	if subjectToken == "" {
-		// Default: exchange the caller's own token (impersonation of self →
-		// narrowed audience/scope).
-		subjectToken = rawToken
-		subjectTokenType = tokenexchange.TokenTypeAccessToken
+	if subjectToken == "" || subjectTokenType == "" {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_request",
+			"subject_token and subject_token_type are required")
+		return
 	}
 
 	client := tokenexchange.NewClient(tep.TokenEndpoint(), nil)
@@ -140,6 +140,13 @@ func (h *ExchangeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeOAuthError(w, http.StatusBadGateway, "server_error", "exchange with authorization server failed")
+		return
+	}
+
+	// RFC 8693 §2.2.1: never relay a response missing REQUIRED fields.
+	if err := tokenexchange.Validate(resp); err != nil {
+		writeOAuthError(w, http.StatusBadGateway, "server_error",
+			"authorization server returned an invalid exchange response: "+err.Error())
 		return
 	}
 

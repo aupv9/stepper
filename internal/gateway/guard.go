@@ -25,7 +25,7 @@ import (
 type Guard struct {
 	registry      *tenant.Registry
 	resolver      tenant.Resolver
-	policyEngine  *policy.Engine
+	policyEngine  policy.Evaluator
 	realm         string
 	sm            *stepup.StateMachine
 	audit         *telemetry.AuditLogger
@@ -43,9 +43,12 @@ type Guard struct {
 
 // GuardConfig holds Guard dependencies.
 type GuardConfig struct {
-	Registry     *tenant.Registry
-	Resolver     tenant.Resolver
-	PolicyEngine *policy.Engine
+	Registry *tenant.Registry
+	Resolver tenant.Resolver
+	// PolicyEngine is the policy decision point. Use policy.New for the
+	// built-in YAML engine, or plug an external PDP (CEL, OPA sidecar, …)
+	// implementing policy.Evaluator.
+	PolicyEngine policy.Evaluator
 	Realm        string
 	Audit        *telemetry.AuditLogger
 	Metrics      *telemetry.Metrics
@@ -237,16 +240,7 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Policy evaluation
 	if g.policyEngine != nil {
-		result, evalErr := g.policyEngine.Evaluate(&policy.PolicyRequest{
-			Method:               r.Method,
-			Path:                 r.URL.Path,
-			TokenACR:             claims.ACR,
-			TokenAMR:             claims.AMR,
-			TokenScopes:          claims.Scopes,
-			TokenAudience:        claims.Audience,
-			AuthAge:              claims.AuthAge(),
-			AuthorizationDetails: claims.AuthorizationDetails,
-		})
+		result, evalErr := g.policyEngine.Evaluate(policyRequest(r, r.Method, r.URL.Path, claims, tenantID))
 		if evalErr != nil {
 			http.Error(w, "policy evaluation error", http.StatusInternalServerError)
 			return
@@ -310,6 +304,30 @@ func sanitizeForwardHeaders(h http.Header) {
 	}
 }
 
+// policyRequest builds the policy engine input from the HTTP request context
+// and verified token claims. method/path may differ from r (step-up replay
+// re-evaluates the saved request).
+func policyRequest(r *http.Request, method, path string, claims *token.CommonClaims, tenantID string) *policy.PolicyRequest {
+	headers := make(map[string]string, len(r.Header))
+	for name := range r.Header {
+		headers[name] = r.Header.Get(name)
+	}
+	return &policy.PolicyRequest{
+		Method:               method,
+		Path:                 path,
+		TenantID:             tenantID,
+		TokenACR:             claims.ACR,
+		TokenAMR:             claims.AMR,
+		TokenScopes:          claims.Scopes,
+		TokenRoles:           claims.Roles,
+		TokenAudience:        claims.Audience,
+		AuthAge:              claims.AuthAge(),
+		ClientIP:             clientKey(r),
+		Headers:              headers,
+		AuthorizationDetails: claims.AuthorizationDetails,
+	}
+}
+
 // completeStepUp finishes a pending step-up flow: it re-evaluates policy for
 // the saved (original) request with the current token's claims and drives the
 // stepup.StateMachine. Only a flow that reaches StateCompleted is replayed.
@@ -323,16 +341,7 @@ func (g *Guard) completeStepUp(ctx context.Context, w http.ResponseWriter, r *ht
 	}
 
 	if g.policyEngine != nil {
-		result, evalErr := g.policyEngine.Evaluate(&policy.PolicyRequest{
-			Method:               saved.Method,
-			Path:                 saved.Path,
-			TokenACR:             claims.ACR,
-			TokenAMR:             claims.AMR,
-			TokenScopes:          claims.Scopes,
-			TokenAudience:        claims.Audience,
-			AuthAge:              claims.AuthAge(),
-			AuthorizationDetails: claims.AuthorizationDetails,
-		})
+		result, evalErr := g.policyEngine.Evaluate(policyRequest(r, saved.Method, saved.Path, claims, tenantID))
 		if evalErr != nil {
 			g.sm.Fail(flow)
 			http.Error(w, "policy evaluation error", http.StatusInternalServerError)

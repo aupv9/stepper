@@ -55,6 +55,9 @@ func (a *Adapter) JWKSURL() string {
 	return ""
 }
 
+// ClientID returns the OAuth client ID this adapter authenticates as.
+func (a *Adapter) ClientID() string { return a.cfg.ClientID }
+
 // TokenEndpoint returns the discovered token_endpoint (empty until RefreshConfig succeeds).
 func (a *Adapter) TokenEndpoint() string {
 	a.mu.RLock()

@@ -221,7 +221,13 @@ func (f *File) Validate() error {
 		}
 
 		switch t.Validation {
-		case "", "introspection", "jwt":
+		case "", "introspection":
+		case "jwt":
+			// Local validation skips introspection, so audience restriction
+			// is the only thing scoping the token to this RS — require it.
+			if t.Audience == "" {
+				return fmt.Errorf("tenant %q: audience is required when validation is \"jwt\"", t.ID)
+			}
 		default:
 			return fmt.Errorf("tenant %q: unknown validation mode %q (want introspection or jwt)", t.ID, t.Validation)
 		}

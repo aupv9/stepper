@@ -2,36 +2,66 @@ package policy
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/common-iam/iam/pkg/core/rar"
 )
 
+// Evaluator is the policy decision point interface. Engine is the built-in
+// YAML implementation; external PDPs (CEL, OPA sidecar, …) can be plugged in
+// anywhere an Evaluator is accepted (e.g. the gateway guard).
+type Evaluator interface {
+	Evaluate(req *PolicyRequest) (*PolicyResult, error)
+}
+
 // Engine evaluates access policies against incoming requests.
 type Engine struct {
+	mu     sync.RWMutex
 	config *Config
+	// order holds policy indices sorted by priority (desc), stable in file order.
+	order []int
 }
+
+var _ Evaluator = (*Engine)(nil)
 
 // New creates a new Engine with the given config.
 func New(cfg *Config) *Engine {
-	return &Engine{config: cfg}
+	e := &Engine{}
+	e.Reload(cfg)
+	return e
 }
 
 // Evaluate checks whether the given request satisfies all applicable policies.
-// Returns a PolicyResult indicating if access is allowed and what is required.
+// Policies apply in priority order (higher first, file order within equal
+// priority); the first policy whose scope AND conditions match decides:
+// effect deny rejects outright, effect allow (default) evaluates requirements.
 func (e *Engine) Evaluate(req *PolicyRequest) (*PolicyResult, error) {
-	if e.config == nil {
+	e.mu.RLock()
+	cfg, order := e.config, e.order
+	e.mu.RUnlock()
+
+	if cfg == nil {
 		return &PolicyResult{Allowed: false, Reason: "no policy config loaded"}, nil
 	}
 
-	for i := range e.config.Policies {
-		p := &e.config.Policies[i]
+	for _, i := range order {
+		p := &cfg.Policies[i]
 		if !p.Enabled {
 			continue
 		}
 		if !e.matchesPolicy(p, req) {
 			continue
+		}
+
+		if p.Effect == "deny" {
+			return &PolicyResult{
+				Allowed:       false,
+				MatchedPolicy: p,
+				Reason:        fmt.Sprintf("denied by policy %q", p.Name),
+			}, nil
 		}
 
 		// Policy matched - evaluate requirements
@@ -42,9 +72,16 @@ func (e *Engine) Evaluate(req *PolicyRequest) (*PolicyResult, error) {
 	return &PolicyResult{Allowed: false, Reason: "no matching policy"}, nil
 }
 
-// matchesPolicy returns true if this request falls under the policy's scope.
+// matchesPolicy returns true if this request falls under the policy's scope
+// (methods, resources, tenants, and when-conditions).
 func (e *Engine) matchesPolicy(p *Policy, req *PolicyRequest) bool {
 	if !MatchMethod(p.Methods, req.Method) {
+		return false
+	}
+	if len(p.Tenants) > 0 && !containsString(p.Tenants, req.TenantID) {
+		return false
+	}
+	if !MatchCondition(p.When, req) {
 		return false
 	}
 	for _, resource := range p.Resources {
@@ -112,6 +149,17 @@ func (e *Engine) check(p *Policy, req *PolicyRequest) *PolicyResult {
 		}
 	}
 
+	// Check roles
+	if len(p.RequireRoles) > 0 {
+		for _, role := range p.RequireRoles {
+			if !containsString(req.TokenRoles, role) {
+				result.Allowed = false
+				result.Reason = fmt.Sprintf("missing required role: %s", role)
+				return result
+			}
+		}
+	}
+
 	// Check MFA
 	if p.RequireMFA {
 		if !containsString(req.TokenAMR, "mfa") && !containsString(req.TokenAMR, "otp") && !containsString(req.TokenAMR, "hwk") {
@@ -134,20 +182,43 @@ func (e *Engine) check(p *Policy, req *PolicyRequest) *PolicyResult {
 	return result
 }
 
-// Reload replaces the policy config at runtime (hot-reload).
+// Reload replaces the policy config at runtime (hot-reload) and rebuilds the
+// priority-sorted evaluation order.
 func (e *Engine) Reload(cfg *Config) {
+	var order []int
+	if cfg != nil {
+		order = make([]int, len(cfg.Policies))
+		for i := range order {
+			order[i] = i
+		}
+		sort.SliceStable(order, func(a, b int) bool {
+			return cfg.Policies[order[a]].Priority > cfg.Policies[order[b]].Priority
+		})
+	}
+
+	e.mu.Lock()
 	e.config = cfg
+	e.order = order
+	e.mu.Unlock()
+}
+
+// Config returns the currently loaded configuration (for admin listing).
+func (e *Engine) Config() *Config {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config
 }
 
 // Summary returns a human-readable summary of loaded policies.
 func (e *Engine) Summary() string {
-	if e.config == nil {
+	cfg := e.Config()
+	if cfg == nil {
 		return "no policies loaded"
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "realm=%s, policies=%d, acr_levels=%d\n",
-		e.config.Realm, len(e.config.Policies), len(e.config.ACRLevels))
-	for _, p := range e.config.Policies {
+		cfg.Realm, len(cfg.Policies), len(cfg.ACRLevels))
+	for _, p := range cfg.Policies {
 		status := "enabled"
 		if !p.Enabled {
 			status = "disabled"
