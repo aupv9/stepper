@@ -1,0 +1,75 @@
+{
+  "title": "IAM Gateway",
+  "uid": "iam-gateway",
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Step-up challenges / s",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (tenant, required_acr) (rate(iam_stepup_challenges_total[5m]))",
+          "legendFormat": "{{tenant}} → {{required_acr}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Step-up success / s",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (tenant) (rate(iam_stepup_success_total[5m]))",
+          "legendFormat": "{{tenant}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Token cache hit ratio",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(iam_token_cache_total{result=\"hit\"}[5m])) / sum(rate(iam_token_cache_total[5m]))",
+          "legendFormat": "hit ratio"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 } }
+    },
+    {
+      "id": 4,
+      "title": "Policy denials / s",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum by (policy, reason) (rate(iam_policy_denied_total[5m]))",
+          "legendFormat": "{{policy}}: {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Active tenants",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+      "targets": [{ "expr": "iam_active_tenants" }]
+    },
+    {
+      "id": 6,
+      "title": "Process memory (RSS)",
+      "type": "timeseries",
+      "gridPos": { "h": 4, "w": 18, "x": 6, "y": 16 },
+      "targets": [
+        { "expr": "process_resident_memory_bytes{job=\"iam-gateway\"}", "legendFormat": "rss" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    }
+  ]
+}

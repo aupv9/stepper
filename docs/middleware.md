@@ -222,3 +222,17 @@ r.Use(iamgin.Middleware(cfg)) // 3. auth enforcement  ← here
 r.Use(rateLimiter())          // 4. rate limiting (optional, after auth)
 // business handlers
 ```
+
+## chi (and other net/http routers)
+
+`chi`, `gorilla/mux`, and any router built on `net/http` can use the stdlib
+middleware directly — no dedicated adapter needed:
+
+```go
+r := chi.NewRouter()
+r.Use(stdlibmw.Middleware(stdlibmw.Config{ /* same options as net/http */ }))
+```
+
+Fiber (fasthttp-based) is intentionally not supported: it does not speak
+`net/http`, and adding a fasthttp dependency for one adapter is not worth the
+maintenance cost. Run the gateway in front of Fiber apps instead.

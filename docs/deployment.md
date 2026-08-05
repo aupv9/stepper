@@ -261,3 +261,30 @@ This clears the token from the cache immediately, without waiting for the 30s TT
 - [ ] Set resource limits on the container
 - [ ] Enable readiness/liveness probes on `/health`
 - [ ] Restrict `/admin/` routes with network policy or authentication
+
+## HA & operations (phase 2)
+
+- **Config file**: set `IAM_CONFIG_FILE=iam.yaml` for multi-tenant, TLS, Redis,
+  rate-limit, DPoP and FAPI settings — see `config/iam.example.yaml`. Env vars
+  always override the file.
+- **Redis (required for >1 replica)**: `IAM_REDIS_ADDR` shares the token
+  cache, DPoP jti replay protection, revocation index, and rate limits across
+  replicas. Without it the gateway logs a warning and each replica enforces
+  these only locally.
+- **TLS**: `IAM_TLS_CERT_FILE` + `IAM_TLS_KEY_FILE` terminate HTTPS;
+  `IAM_TLS_CLIENT_CA` additionally accepts (and verifies) client certificates,
+  enabling RFC 8705 certificate-bound tokens.
+- **Probes**: `/health/live` (process up) vs `/health/ready` (Redis ping +
+  OIDC discovery loaded per tenant). `/health` remains a liveness alias.
+- **Hot reload**: `SIGHUP` or `POST /admin/reload` re-reads the policy file
+  and tenant configuration without a restart.
+- **Kubernetes**: `deployments/k8s/iam-gateway.yaml` ships a Deployment (2
+  replicas), Service, HPA, and ConfigMap wired to the probes above.
+- **Quickstart stack**: `make quickstart` boots gateway + Keycloak + Redis +
+  Prometheus + Grafana (pre-provisioned dashboard) via
+  `deployments/quickstart/docker-compose.yml`.
+- **Load testing**: `make loadtest` runs `loadtest/k6.js` (p99 < 20ms budget
+  on the cache-hit path) against a running gateway.
+- **Audit sinks**: beyond slog and plain files, `telemetry.NewRotatingFileSink`
+  (size-based rotation) and `telemetry.NewWebhookSink` (HMAC-signed HTTP
+  delivery to a SIEM/Kafka REST proxy) attach via `AuditLogger.AddSink`.

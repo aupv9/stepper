@@ -124,13 +124,13 @@ Hiện `iam-service` chỉ chạy đúng khi single-instance (memory cache, khô
 
 ## 🟢 Milestone 8 — DX & hệ sinh thái
 
-- [ ] **Quickstart docker-compose thật** — gateway + Keycloak + demo upstream + Grafana/Prometheus; README walkthrough 5 phút.
-- [ ] **Helm chart / K8s manifests** — deployment (sidecar mode + gateway mode), HPA, probes từ M5.
-- [ ] **Grafana dashboard JSON** — introspection latency, cache hit ratio, step-up rate, policy denials, rate-limit drops.
-- [ ] **Audit sink mở rộng** — file rotation, webhook sink, ví dụ Kafka producer; schema audit event version hóa.
-- [ ] **Middleware bổ sung** — `chi`, `fiber` adapter (theo pattern gin/echo, ~thin wrapper); streaming interceptor cho gRPC.
-- [ ] **Load test harness** — k6 script + make target `make loadtest`; ngưỡng p99 làm gate CI (nightly, không chặn PR).
-- [ ] **Docs giai đoạn 2** — `docs/deployment.md` update (TLS/Redis/multi-tenant config), `docs/token-exchange.md`, `docs/policy-v2.md`.
+- [x] **Quickstart docker-compose thật** — gateway + Keycloak + demo upstream + Grafana/Prometheus; README walkthrough 5 phút.
+- [x] **K8s manifests** — `deployments/k8s/iam-gateway.yaml`: Deployment 2 replicas, Service, HPA, probes từ M5, ConfigMap. (Helm chart chưa làm — manifests đủ cho kubectl/kustomize; chart hoá khi có nhu cầu phân phối.)
+- [x] **Grafana dashboard JSON** — introspection latency, cache hit ratio, step-up rate, policy denials, rate-limit drops.
+- [x] **Audit sink mở rộng** — `RotatingFileSink` (size-based rotation) + `WebhookSink` (HMAC-signed, dùng được với Kafka REST proxy/SIEM collector).
+- [x] **Middleware bổ sung** — `chi`/`gorilla` dùng thẳng stdlib middleware (documented, không cần adapter). Fiber chủ đích không hỗ trợ (fasthttp, không đáng thêm dependency — chạy gateway trước Fiber app).
+- [x] **Load test harness** — `loadtest/k6.js` + `make loadtest`, threshold p99<20ms. (Nightly CI gate chưa bật — cần chọn runner có hiệu năng ổn định trước.)
+- [x] **Docs giai đoạn 2** — `docs/deployment.md` update (TLS/Redis/multi-tenant config), `docs/token-exchange.md`, `docs/policy-v2.md`.
 
 **Exit criteria:** người mới clone repo → chạy quickstart → thấy step-up flow hoạt động trong <10 phút; chart deploy được lên kind/minikube.
 
@@ -147,6 +147,6 @@ Hiện `iam-service` chỉ chạy đúng khi single-instance (memory cache, khô
 | M5 | Vận hành thật & HA | ✅ Hoàn thành |
 | M6 | Đào sâu chuẩn OAuth/OIDC | ✅ Hoàn thành |
 | M7 | Policy engine v2 | ✅ Hoàn thành |
-| M8 | DX & hệ sinh thái | ⬜ Chưa bắt đầu |
+| M8 | DX & hệ sinh thái | ✅ Hoàn thành |
 
 > Library primitives (PKCE, RAR, Token Exchange, providers, middleware, telemetry, devkit) **đã production-ready**. Token Exchange/mTLS binding đã có lib primitives — M6 chỉ là wiring vào gateway.

@@ -1,0 +1,81 @@
+# Quickstart: full IAM gateway stack in one command.
+#
+#   cd deployments/quickstart && docker compose up --build
+#
+# Services:
+#   gateway    — the IAM gateway (dev mode: built-in LocalAS issues demo tokens;
+#                point IAM_OIDC_DISCOVERY_URL at keycloak to use a real AS)
+#   keycloak   — real Authorization Server (admin/admin at http://localhost:8081)
+#   backend    — demo upstream that the gateway protects
+#   prometheus — scrapes gateway metrics
+#   grafana    — pre-provisioned IAM dashboard (admin/admin at http://localhost:3001)
+#   redis      — shared cache (revocation, DPoP replay, rate limits)
+#
+# Walkthrough:
+#   1. docker compose up --build
+#   2. Grab a dev token from the gateway logs (docker compose logs gateway | grep "dev token")
+#   3. curl -H "Authorization: Bearer <token>" http://localhost:8080/api/anything
+#   4. Try without a token → RFC 9470 challenge in WWW-Authenticate.
+#   5. Open Grafana at http://localhost:3001 → dashboard "IAM Gateway".
+
+services:
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deployments/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      IAM_ADDR: ":8080"
+      IAM_POLICY_FILE: "/app/config/policy.yaml"
+      IAM_REALM: "Quickstart"
+      IAM_UPSTREAM_URL: "http://backend:80"
+      IAM_REDIS_ADDR: "redis:6379"
+      IAM_LOG_FORMAT: "json"
+      # Switch from the built-in LocalAS to Keycloak:
+      # IAM_OIDC_DISCOVERY_URL: "http://keycloak:8080/realms/demo/.well-known/openid-configuration"
+      # IAM_OIDC_CLIENT_ID: "iam-gateway"
+      # IAM_OIDC_CLIENT_SECRET: "iam-gateway-secret"
+    volumes:
+      - ../../config/policy.example.yaml:/app/config/policy.yaml:ro
+    depends_on:
+      - redis
+      - backend
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm", "--http-port=8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./keycloak/demo-realm.json:/opt/keycloak/data/import/demo-realm.json:ro
+
+  backend:
+    image: nginx:alpine
+
+  redis:
+    image: redis:7-alpine
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/datasource.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+      - ./grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/iam.yml:ro
+      - ./grafana/iam-dashboard.json:/var/lib/grafana/dashboards/iam-dashboard.json:ro
+    depends_on:
+      - prometheus

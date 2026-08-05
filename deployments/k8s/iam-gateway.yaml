@@ -1,0 +1,106 @@
+# IAM gateway on Kubernetes — gateway mode (fronting an upstream Service).
+# For sidecar mode, add the container to your app pod and set
+# IAM_UPSTREAM_URL to http://127.0.0.1:<app-port>.
+#
+#   kubectl apply -f deployments/k8s/iam-gateway.yaml
+#
+# Requires a Redis reachable at redis:6379 for multi-replica deployments
+# (revocation, DPoP replay protection, and rate limits are shared through it).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iam-gateway-config
+data:
+  iam.yaml: |
+    addr: ":8080"
+    realm: "IAM"
+    policy_file: "/etc/iam/policy.yaml"
+    log_format: "json"
+    default_tenant: "default"
+    redis:
+      addr: "redis:6379"
+    rate_limit:
+      rps: 100
+    tenants: []          # empty = LocalAS dev mode; declare real tenants here
+    resolvers: []
+  policy.yaml: |
+    realm: IAM
+    policies:
+      - name: default-open
+        resources: ["/**"]
+        enabled: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iam-gateway
+  labels: { app: iam-gateway }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: iam-gateway }
+  template:
+    metadata:
+      labels: { app: iam-gateway }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: gateway
+          image: common-iam:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: IAM_CONFIG_FILE
+              value: /etc/iam/iam.yaml
+            # Secrets belong in a Secret, not the ConfigMap:
+            # - name: IAM_ADMIN_TOKEN
+            #   valueFrom: { secretKeyRef: { name: iam-gateway-secrets, key: admin-token } }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/iam
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { cpu: "1", memory: 256Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: iam-gateway-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: iam-gateway
+spec:
+  selector: { app: iam-gateway }
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: iam-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: iam-gateway
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
