@@ -74,6 +74,18 @@ func (e *Engine) check(p *Policy, req *PolicyRequest) *PolicyResult {
 		}
 	}
 
+	// Check audience (RFC 8707 resource indicators). Fail closed: a policy
+	// that names an audience cannot be satisfied by a token without aud.
+	if len(p.RequireAudience) > 0 {
+		for _, aud := range p.RequireAudience {
+			if !containsString(req.TokenAudience, aud) {
+				result.Allowed = false
+				result.Reason = fmt.Sprintf("token audience does not include required %q", aud)
+				return result
+			}
+		}
+	}
+
 	// Check ACR
 	if p.RequireACR != "" {
 		if !ACRSatisfies(req.TokenACR, p.RequireACR, e.config.ACRLevels) {

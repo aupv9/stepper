@@ -218,7 +218,14 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 4c. FAPI 2.0 Security Profile enforcement, when configured.
+	// 4c. mTLS certificate binding (RFC 8705): tokens carrying cnf.x5t#S256
+	// are only accepted from the TLS client that owns the bound certificate.
+	if certErr := token.VerifyCertBinding(r, claims); certErr != nil {
+		g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "certificate binding failed: "+certErr.Error(), "", 0)
+		return
+	}
+
+	// 4d. FAPI 2.0 Security Profile enforcement, when configured.
 	if g.fapiCfg != nil {
 		if fapiErr := fapi.ValidateRequest(r, claims, *g.fapiCfg); fapiErr != nil {
 			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, fapiErr.Error(), "", 0)
@@ -236,6 +243,7 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			TokenACR:             claims.ACR,
 			TokenAMR:             claims.AMR,
 			TokenScopes:          claims.Scopes,
+			TokenAudience:        claims.Audience,
 			AuthAge:              claims.AuthAge(),
 			AuthorizationDetails: claims.AuthorizationDetails,
 		})
@@ -321,6 +329,7 @@ func (g *Guard) completeStepUp(ctx context.Context, w http.ResponseWriter, r *ht
 			TokenACR:             claims.ACR,
 			TokenAMR:             claims.AMR,
 			TokenScopes:          claims.Scopes,
+			TokenAudience:        claims.Audience,
 			AuthAge:              claims.AuthAge(),
 			AuthorizationDetails: claims.AuthorizationDetails,
 		})

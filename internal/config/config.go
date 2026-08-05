@@ -24,6 +24,11 @@ type File struct {
 	CookieSecret  string `yaml:"cookie_secret"`
 	EnableFAPI    bool   `yaml:"enable_fapi"`
 
+	// EnableTokenExchange serves RFC 8693 token exchange on /token/exchange,
+	// brokered to each tenant's token endpoint. Callers need scope
+	// "token:exchange".
+	EnableTokenExchange bool `yaml:"enable_token_exchange"`
+
 	TLS       TLS       `yaml:"tls"`
 	Redis     Redis     `yaml:"redis"`
 	RateLimit RateLimit `yaml:"rate_limit"`
@@ -69,6 +74,13 @@ type DPoP struct {
 type Tenant struct {
 	ID       string `yaml:"id"`
 	Provider string `yaml:"provider"` // generic | keycloak | auth0
+
+	// Validation selects how access tokens are checked:
+	//   "introspection" (default) — RFC 7662 round-trip to the AS
+	//   "jwt" — local JWS validation against the provider's JWKS; opaque
+	//   tokens still fall back to introspection. Faster, but AS-side
+	//   revocation is invisible until the token expires.
+	Validation string `yaml:"validation"`
 
 	// generic
 	DiscoveryURL string `yaml:"discovery_url"`
@@ -140,6 +152,7 @@ func (f *File) applyEnv() {
 	setStr(&f.WebhookSecret, "IAM_WEBHOOK_SECRET")
 	setStr(&f.CookieSecret, "IAM_COOKIE_SECRET")
 	setBool(&f.EnableFAPI, "IAM_ENABLE_FAPI")
+	setBool(&f.EnableTokenExchange, "IAM_ENABLE_TOKEN_EXCHANGE")
 
 	setStr(&f.TLS.CertFile, "IAM_TLS_CERT_FILE")
 	setStr(&f.TLS.KeyFile, "IAM_TLS_KEY_FILE")
@@ -205,6 +218,12 @@ func (f *File) Validate() error {
 			}
 		default:
 			return fmt.Errorf("tenant %q: unknown provider %q (want generic, keycloak, or auth0)", t.ID, t.Provider)
+		}
+
+		switch t.Validation {
+		case "", "introspection", "jwt":
+		default:
+			return fmt.Errorf("tenant %q: unknown validation mode %q (want introspection or jwt)", t.ID, t.Validation)
 		}
 	}
 

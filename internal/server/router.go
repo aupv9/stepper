@@ -21,6 +21,14 @@ type RouterConfig struct {
 	// dependencies (AS discovery loaded, Redis reachable) and return an error
 	// when the instance must not receive traffic yet.
 	ReadyCheck func(ctx context.Context) error
+
+	// ExchangeHandler, when set, serves RFC 8693 token exchange on
+	// POST /token/exchange.
+	ExchangeHandler *gateway.ExchangeHandler
+
+	// BackchannelLogout, when set, serves OIDC Back-Channel Logout on
+	// POST /webhook/backchannel-logout.
+	BackchannelLogout *gateway.BackchannelLogoutHandler
 }
 
 // NewRouter builds and returns the main HTTP router.
@@ -63,6 +71,16 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	// Token revocation webhook
 	mux.Handle("/webhook/revoke", cfg.Gateway.RevocationHandler())
+
+	// OIDC Back-Channel Logout endpoint
+	if cfg.BackchannelLogout != nil {
+		mux.Handle("/webhook/backchannel-logout", cfg.BackchannelLogout)
+	}
+
+	// RFC 8693 token exchange endpoint
+	if cfg.ExchangeHandler != nil {
+		mux.Handle("/token/exchange", cfg.ExchangeHandler)
+	}
 
 	// All other traffic goes through the auth gateway
 	mux.Handle("/", cfg.Gateway)

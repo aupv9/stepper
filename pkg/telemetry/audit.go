@@ -24,6 +24,8 @@ const (
 	AuditTokenRevoked       AuditEventType = "iam.token.revoked"
 	AuditTenantRegistered   AuditEventType = "iam.tenant.registered"
 	AuditTenantUnregistered AuditEventType = "iam.tenant.unregistered"
+	AuditTokenExchanged     AuditEventType = "iam.token.exchanged"
+	AuditBackchannelLogout  AuditEventType = "iam.session.backchannel_logout"
 )
 
 // AuditEvent is a structured security audit event (inspired by RFC 8417 SET).

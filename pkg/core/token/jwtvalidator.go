@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/common-iam/iam/pkg/core/rar"
 )
 
 // JWTValidatorConfig configures local JWT validation.
@@ -35,20 +37,28 @@ type JWTValidatorConfig struct {
 	// "ES256"]). Default: RS256/RS384/RS512/ES256/ES384/ES512 — "none" and
 	// HMAC algorithms are never accepted.
 	ValidMethods []string
+
+	// OnRefreshError, when set, is called whenever a JWKS refresh attempt
+	// fails (after retries). Use it to increment a metric or log.
+	OnRefreshError func(error)
 }
 
 // JWTValidator validates JWTs locally using a remote JWKS endpoint.
 // This bypasses introspection round-trips, useful when the AS is trusted
 // and low-latency validation is needed.
 type JWTValidator struct {
-	jwksURL    string
-	httpClient *http.Client
-	cacheTTL   time.Duration
-	parseOpts  []jwt.ParserOption
+	jwksURL        string
+	httpClient     *http.Client
+	cacheTTL       time.Duration
+	parseOpts      []jwt.ParserOption
+	onRefreshError func(error)
 
 	mu        sync.RWMutex
 	keySet    map[string]crypto.PublicKey // kid → key; "" key for kidless JWKS
 	fetchedAt time.Time
+	// effectiveTTL is cacheTTL possibly overridden by the endpoint's
+	// Cache-Control max-age (clamped to [30s, 24h]).
+	effectiveTTL time.Duration
 }
 
 // defaultValidMethods are the asymmetric algorithms accepted when
@@ -81,12 +91,29 @@ func NewJWTValidator(cfg JWTValidatorConfig) *JWTValidator {
 	}
 
 	return &JWTValidator{
-		jwksURL:    cfg.JWKSURL,
-		httpClient: cfg.HTTPClient,
-		cacheTTL:   cfg.CacheTTL,
-		parseOpts:  opts,
-		keySet:     make(map[string]crypto.PublicKey),
+		jwksURL:        cfg.JWKSURL,
+		httpClient:     cfg.HTTPClient,
+		cacheTTL:       cfg.CacheTTL,
+		effectiveTTL:   cfg.CacheTTL,
+		parseOpts:      opts,
+		onRefreshError: cfg.OnRefreshError,
+		keySet:         make(map[string]crypto.PublicKey),
 	}
+}
+
+// ParseWithClaims verifies a raw JWT's signature against the JWKS and
+// unmarshals its payload into claims. Use this for non-access-token JWTs
+// (e.g. OIDC back-channel logout tokens) that need custom claim structures.
+// The same signing-algorithm restrictions as Validate apply.
+func (v *JWTValidator) ParseWithClaims(ctx context.Context, rawToken string, claims jwt.Claims) error {
+	token, err := jwt.ParseWithClaims(rawToken, claims, v.keyfunc(ctx), v.parseOpts...)
+	if err != nil {
+		return fmt.Errorf("jwt validation: %w", err)
+	}
+	if !token.Valid {
+		return fmt.Errorf("invalid token")
+	}
+	return nil
 }
 
 // Validate parses and verifies a raw JWT, returning normalized CommonClaims.
@@ -133,7 +160,7 @@ func (v *JWTValidator) keyfunc(ctx context.Context) jwt.Keyfunc {
 func (v *JWTValidator) lookupKey(kid string) (crypto.PublicKey, error) {
 	v.mu.RLock()
 	key, ok := v.keySet[kid]
-	expired := time.Since(v.fetchedAt) > v.cacheTTL
+	expired := time.Since(v.fetchedAt) > v.effectiveTTL
 	v.mu.RUnlock()
 
 	if ok && !expired {
@@ -143,7 +170,37 @@ func (v *JWTValidator) lookupKey(kid string) (crypto.PublicKey, error) {
 }
 
 // fetchJWKS retrieves keys from the JWKS endpoint and populates the cache.
+// Transient failures are retried with backoff; the endpoint's Cache-Control
+// max-age (when present) overrides the configured cache TTL, clamped to
+// [30s, 24h], so key rotation follows the AS's own schedule.
 func (v *JWTValidator) fetchJWKS(ctx context.Context) error {
+	var lastErr error
+	backoff := 250 * time.Millisecond
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-time.After(backoff):
+				backoff *= 4
+			case <-ctx.Done():
+				if v.onRefreshError != nil {
+					v.onRefreshError(ctx.Err())
+				}
+				return ctx.Err()
+			}
+		}
+		if err := v.fetchJWKSOnce(ctx); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	if v.onRefreshError != nil && lastErr != nil {
+		v.onRefreshError(lastErr)
+	}
+	return lastErr
+}
+
+func (v *JWTValidator) fetchJWKSOnce(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.jwksURL, nil)
 	if err != nil {
 		return err
@@ -176,12 +233,42 @@ func (v *JWTValidator) fetchJWKS(ctx context.Context) error {
 		keys[kid] = key
 	}
 
+	ttl := v.cacheTTL
+	if maxAge := parseCacheControlMaxAge(resp.Header.Get("Cache-Control")); maxAge > 0 {
+		ttl = clampDuration(maxAge, 30*time.Second, 24*time.Hour)
+	}
+
 	v.mu.Lock()
 	v.keySet = keys
 	v.fetchedAt = time.Now()
+	v.effectiveTTL = ttl
 	v.mu.Unlock()
 
 	return nil
+}
+
+// parseCacheControlMaxAge extracts max-age from a Cache-Control header (0 = absent).
+func parseCacheControlMaxAge(header string) time.Duration {
+	for _, directive := range strings.Split(header, ",") {
+		directive = strings.TrimSpace(strings.ToLower(directive))
+		if rest, ok := strings.CutPrefix(directive, "max-age="); ok {
+			var seconds int
+			if _, err := fmt.Sscanf(rest, "%d", &seconds); err == nil && seconds > 0 {
+				return time.Duration(seconds) * time.Second
+			}
+		}
+	}
+	return 0
+}
+
+func clampDuration(d, min, max time.Duration) time.Duration {
+	if d < min {
+		return min
+	}
+	if d > max {
+		return max
+	}
+	return d
 }
 
 // --- Claims mapping ---
@@ -190,14 +277,18 @@ func (v *JWTValidator) fetchJWKS(ctx context.Context) error {
 type jwtRawClaims struct {
 	jwt.RegisteredClaims
 
-	ACR      string   `json:"acr"`
-	AMR      []string `json:"amr"`
-	SID      string   `json:"sid"`
-	AuthTime int64    `json:"auth_time"`
-	Email    string   `json:"email"`
-	Username string   `json:"preferred_username"`
-	Scope    string   `json:"scope"`
-	TenantID string   `json:"tenant_id"`
+	ACR      string        `json:"acr"`
+	AMR      []string      `json:"amr"`
+	SID      string        `json:"sid"`
+	AuthTime int64         `json:"auth_time"`
+	Email    string        `json:"email"`
+	Username string        `json:"preferred_username"`
+	Scope    string        `json:"scope"`
+	TenantID string        `json:"tenant_id"`
+	Cnf      *Confirmation `json:"cnf"`
+
+	// AuthorizationDetails carries RFC 9396 details when present.
+	AuthorizationDetails []rar.AuthorizationDetail `json:"authorization_details"`
 
 	// Keycloak nested roles
 	RealmAccess struct {
@@ -210,15 +301,18 @@ type jwtRawClaims struct {
 
 func (r *jwtRawClaims) toCommonClaims() *CommonClaims {
 	c := &CommonClaims{
-		Subject:   r.Subject,
-		Issuer:    r.Issuer,
-		ACR:       r.ACR,
-		AMR:       r.AMR,
-		SessionID: r.SID,
-		Email:     r.Email,
-		Username:  r.Username,
-		TenantID:  r.TenantID,
-		Active:    true,
+		Subject:              r.Subject,
+		Issuer:               r.Issuer,
+		JTI:                  r.ID,
+		ACR:                  r.ACR,
+		AMR:                  r.AMR,
+		SessionID:            r.SID,
+		Email:                r.Email,
+		Username:             r.Username,
+		TenantID:             r.TenantID,
+		Confirmation:         r.Cnf,
+		AuthorizationDetails: r.AuthorizationDetails,
+		Active:               true,
 	}
 
 	if r.ExpiresAt != nil {

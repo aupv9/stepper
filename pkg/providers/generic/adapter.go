@@ -45,6 +45,26 @@ func New(cfg Config) *Adapter {
 
 func (a *Adapter) Name() string { return "generic-oidc" }
 
+// JWKSURL returns the discovered jwks_uri (empty until RefreshConfig succeeds).
+func (a *Adapter) JWKSURL() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.discovery != nil {
+		return a.discovery.JWKSUri
+	}
+	return ""
+}
+
+// TokenEndpoint returns the discovered token_endpoint (empty until RefreshConfig succeeds).
+func (a *Adapter) TokenEndpoint() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.discovery != nil {
+		return a.discovery.TokenEndpoint
+	}
+	return ""
+}
+
 func (a *Adapter) Issuer() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()

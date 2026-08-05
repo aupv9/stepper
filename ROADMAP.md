@@ -98,14 +98,14 @@ Hiện `iam-service` chỉ chạy đúng khi single-instance (memory cache, khô
 
 ## 🟠 Milestone 6 — Đào sâu chuẩn OAuth/OIDC
 
-- [ ] **Local JWT validation mode** — per-tenant option dùng `JWTValidator` (JWKS) thay introspection round-trip; bắt buộc set `ExpectedIssuer`/`ExpectedAudience`; fallback introspection cho opaque token. Trade-off revocation-lag phải document.
-- [ ] **Wire Token Exchange (RFC 8693)** — lib `pkg/core/tokenexchange` đã có `Client.Exchange`; thêm endpoint `/token/exchange` ở gateway (delegation/impersonation có policy gate: scope `token:exchange` + audit event riêng).
-- [ ] **mTLS sender-constrained tokens (RFC 8705)** — verify `cnf.x5t#S256` với client cert từ TLS handshake, là alternative cho DPoP; `fapi.ValidateTokenBinding` đã có sẵn hook `allowMTLS`.
-- [ ] **OIDC Back-Channel Logout** — parse logout token (JWT, event `http://schemas.openid.net/event/backchannel-logout`) trên `/webhook/revoke`, map `sid`/`sub` vào revocation index hiện có.
-- [ ] **Resource Indicators (RFC 8707)** — policy per-resource `aud` check: request tới upstream X yêu cầu token có `aud` chứa X.
-- [ ] **JWKS rotation hardening** — refresh theo `Cache-Control`, retry với backoff, metric `iam_jwks_refresh_failures_total`.
+- [x] **Local JWT validation mode** — per-tenant option dùng `JWTValidator` (JWKS) thay introspection round-trip; bắt buộc set `ExpectedIssuer`/`ExpectedAudience`; fallback introspection cho opaque token. Trade-off revocation-lag phải document.
+- [x] **Wire Token Exchange (RFC 8693)** — lib `pkg/core/tokenexchange` đã có `Client.Exchange`; thêm endpoint `/token/exchange` ở gateway (delegation/impersonation có policy gate: scope `token:exchange` + audit event riêng).
+- [x] **mTLS sender-constrained tokens (RFC 8705)** — verify `cnf.x5t#S256` với client cert từ TLS handshake, là alternative cho DPoP; `fapi.ValidateTokenBinding` đã có sẵn hook `allowMTLS`.
+- [x] **OIDC Back-Channel Logout** — parse logout token (JWT, event `http://schemas.openid.net/event/backchannel-logout`) trên `/webhook/revoke`, map `sid`/`sub` vào revocation index hiện có.
+- [x] **Resource Indicators (RFC 8707)** — policy per-resource `aud` check: request tới upstream X yêu cầu token có `aud` chứa X.
+- [x] **JWKS rotation hardening** — refresh theo `Cache-Control`, retry với backoff, metric `iam_jwks_refresh_failures_total`.
 
-**Exit criteria:** rfc-compliance audit pass cho RFC 8693/8705/8707 + back-channel logout; local-JWT mode đo được p99 < 1ms trên benchmark.
+**Exit criteria:** rfc-compliance audit pass cho RFC 8693/8705/8707 + back-channel logout; local-JWT mode đo được p99 < 1ms trên benchmark (thực đo ~48µs/op).
 
 ---
 
@@ -145,7 +145,7 @@ Hiện `iam-service` chỉ chạy đúng khi single-instance (memory cache, khô
 | M3 | Hardening & RFC gaps | ✅ Hoàn thành |
 | M4 | Quality & ops | ✅ Hoàn thành |
 | M5 | Vận hành thật & HA | ✅ Hoàn thành |
-| M6 | Đào sâu chuẩn OAuth/OIDC | ⬜ Chưa bắt đầu |
+| M6 | Đào sâu chuẩn OAuth/OIDC | ✅ Hoàn thành |
 | M7 | Policy engine v2 | ⬜ Chưa bắt đầu |
 | M8 | DX & hệ sinh thái | ⬜ Chưa bắt đầu |
 

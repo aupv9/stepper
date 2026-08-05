@@ -48,6 +48,12 @@ default_tenant: "default"
 # FAPI 2.0 Security Profile enforcement.
 # enable_fapi: false
 
+# RFC 8693 token exchange brokering on POST /token/exchange.
+# Callers need a valid token with scope "token:exchange"; the gateway
+# forwards the exchange to the resolved tenant's token endpoint using that
+# tenant's client credentials.
+# enable_token_exchange: false
+
 # Tenants: one provider per tenant. Empty list = LocalAS dev mode.
 tenants: []
 #  - id: "acme"
@@ -67,6 +73,13 @@ tenants: []
 #    discovery_url: "https://sso.charlie.example/.well-known/openid-configuration"
 #    client_id: "..."
 #    client_secret: "..."
+#    # validation: "jwt" verifies JWS access tokens locally against the
+#    # provider's JWKS (signature/exp/iss, plus aud when audience is set)
+#    # instead of a per-request introspection round-trip. Opaque tokens still
+#    # introspect. Trade-off: AS-side revocation is invisible until expiry —
+#    # keep access-token lifetimes short in this mode.
+#    validation: "jwt"
+#    audience: "https://api.charlie.example"
 
 # Tenant resolution chain, tried in order. Empty = header X-Tenant-ID
 # followed by static default_tenant.

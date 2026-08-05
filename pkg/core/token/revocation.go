@@ -140,6 +140,16 @@ func (h *RevocationHandler) process(ctx context.Context, event *RevocationEvent)
 	return fmt.Errorf("revocation event has no identifiable token reference")
 }
 
+// RevokeBySubject evicts every cached token recorded for a subject.
+func RevokeBySubject(ctx context.Context, c Cache, subject string) error {
+	return deleteIndexedTokens(ctx, c, subIndexPrefix+subject)
+}
+
+// RevokeBySession evicts every cached token recorded for a session ID.
+func RevokeBySession(ctx context.Context, c Cache, sessionID string) error {
+	return deleteIndexedTokens(ctx, c, sidIndexPrefix+sessionID)
+}
+
 // --- Secondary index (jti / subject / session → token hash) ---
 //
 // The index reuses the claims Cache itself so it works with any Cache

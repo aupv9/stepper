@@ -7,36 +7,44 @@ import (
 	"github.com/common-iam/iam/pkg/providers/auth0"
 	"github.com/common-iam/iam/pkg/providers/generic"
 	"github.com/common-iam/iam/pkg/providers/keycloak"
+	"github.com/common-iam/iam/pkg/providers/localjwt"
 	"github.com/common-iam/iam/pkg/tenant"
 )
 
-// BuildProvider constructs the provider adapter for one tenant declaration.
+// BuildProvider constructs the provider adapter for one tenant declaration,
+// wrapping it with local JWT validation when validation: jwt is configured.
 // The caller is responsible for calling RefreshConfig before serving traffic.
 func BuildProvider(t Tenant) (providers.Provider, error) {
+	var inner localjwt.InnerProvider
 	switch t.Provider {
 	case "generic", "":
-		return generic.New(generic.Config{
+		inner = generic.New(generic.Config{
 			DiscoveryURL: t.DiscoveryURL,
 			ClientID:     t.ClientID,
 			ClientSecret: t.ClientSecret,
-		}), nil
+		})
 	case "keycloak":
-		return keycloak.New(keycloak.Config{
+		inner = keycloak.New(keycloak.Config{
 			BaseURL:      t.BaseURL,
 			Realm:        t.Realm,
 			ClientID:     t.ClientID,
 			ClientSecret: t.ClientSecret,
-		}), nil
+		})
 	case "auth0":
-		return auth0.New(auth0.Config{
+		inner = auth0.New(auth0.Config{
 			Domain:       t.Domain,
 			Audience:     t.Audience,
 			ClientID:     t.ClientID,
 			ClientSecret: t.ClientSecret,
-		}), nil
+		})
 	default:
 		return nil, fmt.Errorf("unknown provider %q", t.Provider)
 	}
+
+	if t.Validation == "jwt" {
+		return localjwt.New(inner, localjwt.Config{ExpectedAudience: t.Audience}), nil
+	}
+	return inner, nil
 }
 
 // BuildResolver constructs the tenant resolution chain. An empty declaration

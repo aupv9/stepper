@@ -50,8 +50,10 @@ func New(cfg Config) *Adapter {
 	return &Adapter{inner: inner, cfg: cfg}
 }
 
-func (a *Adapter) Name() string   { return "keycloak" }
-func (a *Adapter) Issuer() string { return a.inner.Issuer() }
+func (a *Adapter) Name() string          { return "keycloak" }
+func (a *Adapter) Issuer() string        { return a.inner.Issuer() }
+func (a *Adapter) JWKSURL() string       { return a.inner.JWKSURL() }
+func (a *Adapter) TokenEndpoint() string { return a.inner.TokenEndpoint() }
 
 func (a *Adapter) RefreshConfig(ctx context.Context) error {
 	return a.inner.RefreshConfig(ctx)

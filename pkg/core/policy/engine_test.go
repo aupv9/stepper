@@ -102,6 +102,30 @@ func TestEngine_MaxAge(t *testing.T) {
 	})
 }
 
+func TestEngine_RequireAudience(t *testing.T) {
+	cfg := &Config{
+		Policies: []Policy{
+			{Name: "aud", Resources: []string{"/api/**"}, RequireAudience: []string{"payments-api"}, Enabled: true},
+		},
+	}
+	e := New(cfg)
+
+	result, _ := e.Evaluate(&PolicyRequest{Method: "GET", Path: "/api/x", TokenAudience: []string{"payments-api", "web"}})
+	if !result.Allowed {
+		t.Errorf("expected allowed with matching audience, got: %s", result.Reason)
+	}
+
+	result, _ = e.Evaluate(&PolicyRequest{Method: "GET", Path: "/api/x", TokenAudience: []string{"other-api"}})
+	if result.Allowed {
+		t.Error("expected denial with wrong audience")
+	}
+
+	result, _ = e.Evaluate(&PolicyRequest{Method: "GET", Path: "/api/x"})
+	if result.Allowed {
+		t.Error("expected denial when token has no aud claim (fail closed)")
+	}
+}
+
 func TestEngine_MFA(t *testing.T) {
 	cfg := &Config{
 		Policies: []Policy{

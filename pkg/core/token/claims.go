@@ -64,6 +64,10 @@ type Confirmation struct {
 	// JKT is the RFC 7638 JWK SHA-256 thumbprint (base64url, no padding)
 	// of the DPoP public key the token is bound to (RFC 9449 §6.1).
 	JKT string `json:"jkt,omitempty"`
+
+	// X5TS256 is the base64url SHA-256 thumbprint of the client certificate
+	// the token is bound to (RFC 8705 §3.1, mTLS sender-constrained tokens).
+	X5TS256 string `json:"x5t#S256,omitempty"`
 }
 
 // AuthAge returns how long ago the user authenticated.

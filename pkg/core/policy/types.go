@@ -28,6 +28,11 @@ type Policy struct {
 	RequireMFA    bool     `yaml:"require_mfa"` // AMR must include mfa
 	RequireScopes []string `yaml:"require_scopes"`
 
+	// RequireAudience enforces RFC 8707 resource indicators: the token's aud
+	// claim must contain every listed value. Fails closed when the token
+	// carries no aud claim.
+	RequireAudience []string `yaml:"require_audience,omitempty"`
+
 	// RequireAuthorizationDetails enforces RFC 9396 authorization_details.
 	// All listed filters must be satisfied by the token's authorization_details claim.
 	RequireAuthorizationDetails []rar.AuthorizationDetailFilter `yaml:"require_authorization_details,omitempty"`
@@ -37,12 +42,13 @@ type Policy struct {
 
 // PolicyRequest is the input to the policy engine.
 type PolicyRequest struct {
-	Method      string
-	Path        string
-	TokenACR    string
-	TokenAMR    []string
-	TokenScopes []string
-	AuthAge     time.Duration // how long ago the user authenticated
+	Method        string
+	Path          string
+	TokenACR      string
+	TokenAMR      []string
+	TokenScopes   []string
+	TokenAudience []string      // token aud claim (for require_audience)
+	AuthAge       time.Duration // how long ago the user authenticated
 
 	// AuthorizationDetails carries RFC 9396 details extracted from the token.
 	AuthorizationDetails []rar.AuthorizationDetail
