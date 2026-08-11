@@ -176,9 +176,19 @@ func (ci *CachedIntrospector) Introspect(ctx context.Context, token string) (*Co
 		return nil, err
 	}
 
-	// Only cache active tokens
+	// Only cache active tokens, and never past their own expiry. Clamp the
+	// configured TTL to the token's remaining lifetime; skip caching when the
+	// token is already expired or carries no exp.
 	if claims.Active {
-		_ = ci.cache.Set(ctx, key, claims, ci.ttl)
+		ttl := ci.ttl
+		if !claims.ExpiresAt.IsZero() {
+			if remaining := time.Until(claims.ExpiresAt); remaining <= 0 {
+				return claims, nil // expired: do not cache
+			} else if remaining < ttl {
+				ttl = remaining
+			}
+		}
+		_ = ci.cache.Set(ctx, key, claims, ttl)
 	}
 
 	return claims, nil

@@ -18,6 +18,7 @@ type IntrospectionResponse struct {
 	Active    bool     `json:"active"`
 	Sub       string   `json:"sub"`
 	Iss       string   `json:"iss"`
+	Aud       Audience `json:"aud"`
 	Exp       int64    `json:"exp"`
 	IAT       int64    `json:"iat"`
 	AuthTime  int64    `json:"auth_time"`
@@ -113,6 +114,7 @@ func introToCommonClaims(r *IntrospectionResponse) *CommonClaims {
 		Username: r.Username,
 		JTI:      r.JTI,
 		CNF:      r.CNF,
+		Audience: []string(r.Aud),
 	}
 	if r.Exp > 0 {
 		c.ExpiresAt = time.Unix(r.Exp, 0)

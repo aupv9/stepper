@@ -148,6 +148,14 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 4a-issuer. Cross-tenant binding: the token's issuer must match the tenant's
+	// provider. Without this, a valid token for tenant A paired with a spoofed
+	// X-Tenant-ID: B header could be evaluated under tenant B's policies.
+	if wantIss := provider.Issuer(); wantIss != "" && claims.Issuer != "" && claims.Issuer != wantIss {
+		g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "token issuer does not match tenant", "", 0)
+		return
+	}
+
 	// 4a. DPoP phase 2: reject replayed proofs, then bind the proof key to the
 	// access token's cnf.jkt. This is what makes DPoP a real sender-constraint.
 	if g.enableDPoP {
@@ -251,14 +259,20 @@ func (g *Guard) introspect(ctx context.Context, provider interface {
 	}
 
 	if g.cache != nil && claims.Active {
+		// Clamp the cache TTL to the token's own lifetime: never cache an
+		// already-expired (or exp-less) token as active, and never keep a
+		// short-lived token cached past its expiry. Skip caching entirely
+		// when the token has no positive remaining lifetime.
 		ttl := time.Until(claims.ExpiresAt)
-		if ttl <= 0 || ttl > 30*time.Second {
-			ttl = 30 * time.Second
-		}
-		hash := token.HashToken(rawToken)
-		_ = g.cache.Set(ctx, hash, claims, ttl)
-		if g.index != nil {
-			_ = g.index.Add(ctx, hash, claims.JTI, claims.Subject, ttl)
+		if !claims.ExpiresAt.IsZero() && ttl > 0 {
+			if ttl > 30*time.Second {
+				ttl = 30 * time.Second
+			}
+			hash := token.HashToken(rawToken)
+			_ = g.cache.Set(ctx, hash, claims, ttl)
+			if g.index != nil {
+				_ = g.index.Add(ctx, hash, claims.JTI, claims.Subject, ttl)
+			}
 		}
 	}
 

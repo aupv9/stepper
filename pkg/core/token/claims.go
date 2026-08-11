@@ -1,11 +1,36 @@
 package token
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
 	"github.com/common-iam/iam/pkg/core/rar"
 )
+
+// Audience represents an OAuth/OIDC "aud" claim, which per spec may be either a
+// single string or an array of strings. It always unmarshals to a slice.
+type Audience []string
+
+func (a *Audience) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	// Try array first, then fall back to a single string.
+	var list []string
+	if err := json.Unmarshal(data, &list); err == nil {
+		*a = list
+		return nil
+	}
+	var single string
+	if err := json.Unmarshal(data, &single); err != nil {
+		return err
+	}
+	if single != "" {
+		*a = []string{single}
+	}
+	return nil
+}
 
 // Sentinel errors for token operations.
 var (
