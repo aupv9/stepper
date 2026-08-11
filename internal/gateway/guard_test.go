@@ -57,6 +57,9 @@ func buildGuard(t *testing.T, provider *generic.Adapter, cfg gateway.GuardConfig
 	if cfg.Resolver == nil {
 		cfg.Resolver = tenant.NewChainResolver(tenant.NewHeaderResolver("X-Tenant-ID"))
 	}
+	if cfg.DefaultTenant == "" {
+		cfg.DefaultTenant = "default"
+	}
 	if cfg.Upstream == nil {
 		cfg.Upstream = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -70,6 +73,74 @@ func buildGuard(t *testing.T, provider *generic.Adapter, cfg gateway.GuardConfig
 	srv := httptest.NewServer(guard)
 	t.Cleanup(srv.Close)
 	return guard, srv
+}
+
+func TestGuard_SanitizesTrustHeaders(t *testing.T) {
+	as, provider := setupAS(t)
+
+	raw, err := as.IssueToken(tokenfactory.TokenOptions{
+		Subject:   "alice",
+		ACR:       "urn:mace:incommon:iap:bronze",
+		Scopes:    []string{"openid"},
+		ExpiresIn: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("IssueToken: %v", err)
+	}
+
+	var gotHeaders http.Header
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	})
+	_, srv := buildGuard(t, provider, gateway.GuardConfig{Upstream: upstream})
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/resource", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	req.Header.Set("X-Tenant-ID", "default")  // valid tenant, but a raw client value
+	req.Header.Set("X-Iam-Subject", "hacker") // spoofed identity
+	req.Header.Set("X-Iam-Tenant-Id", "evil") // spoofed tenant
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	if got := gotHeaders.Get("X-Tenant-ID"); got != "" {
+		t.Errorf("raw X-Tenant-ID must be stripped before upstream, got %q", got)
+	}
+	if got := gotHeaders.Get("X-Iam-Subject"); got != "alice" {
+		t.Errorf("X-Iam-Subject = %q, want verified %q", got, "alice")
+	}
+	if got := gotHeaders.Get("X-Iam-Tenant-Id"); got != "default" {
+		t.Errorf("X-Iam-Tenant-Id = %q, want verified %q (spoof must be overwritten)", got, "default")
+	}
+}
+
+func TestGuard_TenantResolveFailClosed(t *testing.T) {
+	_, provider := setupAS(t)
+
+	// No DefaultTenant configured and no X-Tenant-ID header → must fail closed.
+	guard := gateway.NewGuard(gateway.GuardConfig{
+		Registry: func() *tenant.Registry { r := tenant.NewRegistry(); r.Register("acme", provider); return r }(),
+		Resolver: tenant.NewChainResolver(tenant.NewHeaderResolver("X-Tenant-ID")),
+		Upstream: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+		Realm:    "Test",
+	})
+	srv := httptest.NewServer(guard)
+	t.Cleanup(srv.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/resource", nil)
+	// No token needed — tenant resolution fails first.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 when tenant unresolved and no DefaultTenant, got %d", resp.StatusCode)
+	}
 }
 
 func TestGuard_ValidToken(t *testing.T) {

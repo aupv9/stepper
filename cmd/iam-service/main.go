@@ -118,6 +118,9 @@ func run(cfg Config, logger *slog.Logger) error {
 		EnableDPoP:    cfg.EnableDPoP,
 		WebhookSecret: cfg.WebhookSecret,
 		CookieSecret:  cfg.CookieSecret,
+		// Single-tenant standalone: fall back to "default" when no tenant header
+		// is present. Multi-tenant deployments should leave this empty (fail closed).
+		DefaultTenant: "default",
 	})
 
 	// 7. Admin API + router + server.

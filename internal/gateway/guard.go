@@ -33,6 +33,7 @@ type Guard struct {
 	enableDPoP    bool
 	webhookSecret string
 	cookieSecret  string
+	defaultTenant string // opt-in fallback tenant when resolution fails; "" = fail closed
 }
 
 // GuardConfig holds Guard dependencies.
@@ -62,6 +63,12 @@ type GuardConfig struct {
 	// Leave empty to disable cookie-based step-up state (challenges will still be issued
 	// but the original request won't be replayed automatically after re-auth).
 	CookieSecret string
+
+	// DefaultTenant, when set, is used when the resolver cannot determine a
+	// tenant (e.g. single-tenant deployments). Leave empty to fail closed:
+	// unresolvable tenant context is rejected rather than silently mapped to a
+	// default, preserving per-tenant isolation for untrusted clients.
+	DefaultTenant string
 }
 
 // NewGuard creates a ResourceServerGuard.
@@ -97,6 +104,7 @@ func NewGuard(cfg GuardConfig) *Guard {
 		enableDPoP:    cfg.EnableDPoP,
 		webhookSecret: cfg.WebhookSecret,
 		cookieSecret:  cfg.CookieSecret,
+		defaultTenant: cfg.DefaultTenant,
 	}
 }
 
@@ -106,10 +114,16 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer span.End()
 	r = r.WithContext(ctx)
 
-	// 1. Resolve tenant
+	// 1. Resolve tenant. Fail closed unless an explicit DefaultTenant is set:
+	// silently mapping unresolvable requests to a default tenant would let a
+	// client bypass per-tenant isolation.
 	tenantID, err := g.resolver.Resolve(r)
-	if err != nil {
-		tenantID = "default"
+	if err != nil || tenantID == "" {
+		if g.defaultTenant == "" {
+			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "tenant could not be resolved", "", 0)
+			return
+		}
+		tenantID = g.defaultTenant
 	}
 
 	// 2. Get provider for tenant
@@ -237,7 +251,12 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		stepup.ClearStateCookie(w)
 	}
 
-	// 9. Attach tenant + claims to context, pass to next handler.
+	// 9. Trust-boundary header hygiene: strip any client-supplied tenant/identity
+	// headers and re-inject gateway-verified values, so the upstream can trust
+	// X-Iam-* without re-validating and cannot be fooled by a spoofed X-Tenant-ID.
+	sanitizeTrustHeaders(r, tenantID, claims.Subject)
+
+	// 10. Attach tenant + claims to context, pass to next handler.
 	ctx = tenant.WithTenantID(ctx, tenantID)
 	g.next.ServeHTTP(w, r.WithContext(ctx))
 }
@@ -315,6 +334,21 @@ func (g *Guard) handleDenial(ctx context.Context, w http.ResponseWriter, r *http
 	}
 
 	challenge.WriteChallenge(w)
+}
+
+// sanitizeTrustHeaders removes client-supplied tenant/identity headers and sets
+// the gateway-verified values. The upstream should trust only these X-Iam-*
+// headers, never the raw client-supplied X-Tenant-ID.
+func sanitizeTrustHeaders(r *http.Request, tenantID, subject string) {
+	// Drop the raw resolver input so upstream can't read the unverified value.
+	r.Header.Del("X-Tenant-ID")
+	// Set overwrites any client-spoofed X-Iam-* values.
+	r.Header.Set("X-Iam-Tenant-Id", tenantID)
+	if subject != "" {
+		r.Header.Set("X-Iam-Subject", subject)
+	} else {
+		r.Header.Del("X-Iam-Subject")
+	}
 }
 
 func (g *Guard) issueChallenge(w http.ResponseWriter, r *http.Request, errCode, desc, acrValues string, maxAge int) {
