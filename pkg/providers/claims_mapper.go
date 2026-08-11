@@ -63,8 +63,8 @@ func MapToCommon(raw RawClaims) *token.CommonClaims {
 	// Tenant
 	c.TenantID = firstNonEmpty(
 		stringClaim(raw, "tenant_id"),
-		stringClaim(raw, "tid"),       // Azure AD style
-		stringClaim(raw, "org_id"),    // Auth0 style
+		stringClaim(raw, "tid"),    // Azure AD style
+		stringClaim(raw, "org_id"), // Auth0 style
 	)
 
 	// Remaining claims go into Extra

@@ -112,17 +112,18 @@ func run(cfg Config, logger *slog.Logger) error {
 		logger.Info("rate limiting enabled", "per_sec", cfg.RateLimitPerSec, "burst", cfg.RateBurst)
 	}
 	guard := gateway.NewGuard(gateway.GuardConfig{
-		Registry:      registry,
-		Resolver:      resolver,
-		PolicyEngine:  engine,
-		Realm:         cfg.Realm,
-		Audit:         audit,
-		Metrics:       metrics,
-		Upstream:      upstream,
-		Cache:         token.NewMemoryCache(),
-		EnableDPoP:    cfg.EnableDPoP,
-		WebhookSecret: cfg.WebhookSecret,
-		CookieSecret:  cfg.CookieSecret,
+		Registry:        registry,
+		Resolver:        resolver,
+		PolicyEngine:    engine,
+		Realm:           cfg.Realm,
+		Audit:           audit,
+		Metrics:         metrics,
+		Upstream:        upstream,
+		Cache:           token.NewMemoryCache(),
+		EnableDPoP:      cfg.EnableDPoP,
+		DPoPNonceSecret: cfg.DPoPNonceSecret,
+		WebhookSecret:   cfg.WebhookSecret,
+		CookieSecret:    cfg.CookieSecret,
 		// Single-tenant standalone: fall back to "default" when no tenant header
 		// is present. Multi-tenant deployments should leave this empty (fail closed).
 		DefaultTenant: "default",

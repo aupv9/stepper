@@ -158,16 +158,16 @@ func TestValidateResponseType(t *testing.T) {
 // --- Profile validation tests ---
 
 type fakeClaims struct {
-	dpop        bool
-	parURI      bool
-	authAge     time.Duration
-	nonce       string
+	dpop    bool
+	parURI  bool
+	authAge time.Duration
+	nonce   string
 }
 
-func (f *fakeClaims) HasDPoP() bool              { return f.dpop }
-func (f *fakeClaims) HasPARRequestURI() bool      { return f.parURI }
-func (f *fakeClaims) GetAuthAge() time.Duration   { return f.authAge }
-func (f *fakeClaims) GetNonce() string            { return f.nonce }
+func (f *fakeClaims) HasDPoP() bool             { return f.dpop }
+func (f *fakeClaims) HasPARRequestURI() bool    { return f.parURI }
+func (f *fakeClaims) GetAuthAge() time.Duration { return f.authAge }
+func (f *fakeClaims) GetNonce() string          { return f.nonce }
 
 func goodClaims() *fakeClaims {
 	return &fakeClaims{dpop: true, parURI: true, authAge: 30 * time.Second, nonce: "n1"}

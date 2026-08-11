@@ -20,6 +20,7 @@ type Config struct {
 	WebhookSecret    string // empty = unauthenticated revocation webhook (dev)
 	AdminToken       string // empty = unauthenticated /admin (dev)
 	EnableDPoP       bool
+	DPoPNonceSecret  string  // set + EnableDPoP → require server-issued nonce
 	RateLimitPerSec  float64 // 0 = disabled
 	RateBurst        int
 }
@@ -40,6 +41,7 @@ func LoadConfig() Config {
 		WebhookSecret:    env("IAM_WEBHOOK_SECRET", ""),
 		AdminToken:       env("IAM_ADMIN_TOKEN", ""),
 		EnableDPoP:       envBool("IAM_ENABLE_DPOP", false),
+		DPoPNonceSecret:  env("IAM_DPOP_NONCE_SECRET", ""),
 		RateLimitPerSec:  envFloat("IAM_RATE_LIMIT", 0),
 		RateBurst:        envInt("IAM_RATE_BURST", 20),
 	}

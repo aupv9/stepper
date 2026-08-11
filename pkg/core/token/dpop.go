@@ -40,11 +40,12 @@ type DPoPProof struct {
 	JWK       map[string]interface{}
 
 	// Payload fields
-	JTI string    // unique proof ID
-	HTM string    // HTTP method
-	HTU string    // HTTP URI
-	IAT time.Time // issued at
-	ATH string    // access token hash (base64url SHA-256)
+	JTI   string    // unique proof ID
+	HTM   string    // HTTP method
+	HTU   string    // HTTP URI
+	IAT   time.Time // issued at
+	ATH   string    // access token hash (base64url SHA-256)
+	Nonce string    // server-issued nonce (RFC 9449 §8)
 }
 
 // ValidateDPoP validates the DPoP proof from the request header against the access token.
@@ -196,11 +197,12 @@ func parseDPoPJWT(jwt string) (*DPoPProof, error) {
 	}
 
 	var payload struct {
-		JTI string `json:"jti"`
-		HTM string `json:"htm"`
-		HTU string `json:"htu"`
-		IAT int64  `json:"iat"`
-		ATH string `json:"ath"`
+		JTI   string `json:"jti"`
+		HTM   string `json:"htm"`
+		HTU   string `json:"htu"`
+		IAT   int64  `json:"iat"`
+		ATH   string `json:"ath"`
+		Nonce string `json:"nonce"`
 	}
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		return nil, fmt.Errorf("parsing payload: %w", err)
@@ -214,6 +216,7 @@ func parseDPoPJWT(jwt string) (*DPoPProof, error) {
 		HTU:       payload.HTU,
 		IAT:       time.Unix(payload.IAT, 0),
 		ATH:       payload.ATH,
+		Nonce:     payload.Nonce,
 	}, nil
 }
 

@@ -10,9 +10,9 @@ import (
 	ginfwk "github.com/gin-gonic/gin"
 
 	"github.com/common-iam/iam/pkg/core/policy"
-	iamgin "github.com/common-iam/iam/pkg/middleware/gin"
 	"github.com/common-iam/iam/pkg/devkit/localas"
 	"github.com/common-iam/iam/pkg/devkit/tokenfactory"
+	iamgin "github.com/common-iam/iam/pkg/middleware/gin"
 	"github.com/common-iam/iam/pkg/providers/generic"
 )
 

@@ -28,10 +28,11 @@ type Guard struct {
 	sm            *stepup.StateMachine
 	audit         *telemetry.AuditLogger
 	metrics       *telemetry.Metrics
-	next          http.Handler      // upstream handler (proxy or direct)
-	cache         token.Cache       // optional; nil = no caching
-	index         token.TokenIndex  // optional; jti/subject -> cache key, for revocation
-	replay        token.ReplayGuard // DPoP jti replay guard (built when EnableDPoP)
+	next          http.Handler        // upstream handler (proxy or direct)
+	cache         token.Cache         // optional; nil = no caching
+	index         token.TokenIndex    // optional; jti/subject -> cache key, for revocation
+	replay        token.ReplayGuard   // DPoP jti replay guard (built when EnableDPoP)
+	dpopNonce     *token.NonceService // optional DPoP server-issued nonce (RFC 9449 §8)
 	enableDPoP    bool
 	fapiProfile   bool // enforce FAPI 2.0 profile on every request
 	webhookSecret string
@@ -62,6 +63,11 @@ type GuardConfig struct {
 	// FAPIProfile enforces the FAPI 2.0 Security Profile (DPoP-bound, PAR-
 	// initiated, nonce present, 60s auth_time freshness) on every request.
 	FAPIProfile bool
+
+	// DPoPNonceSecret, when set alongside EnableDPoP, requires a valid
+	// server-issued nonce in every DPoP proof (RFC 9449 §8). Requests without a
+	// valid nonce are answered 401 with a fresh DPoP-Nonce and use_dpop_nonce.
+	DPoPNonceSecret string
 
 	// WebhookSecret is the HMAC-SHA256 secret used to authenticate revocation webhook
 	// calls on /webhook/revoke. Leave empty to disable signature verification (dev only).
@@ -97,8 +103,12 @@ func NewGuard(cfg GuardConfig) *Guard {
 	}
 
 	var replay token.ReplayGuard
+	var dpopNonce *token.NonceService
 	if cfg.EnableDPoP {
 		replay = token.NewMemoryReplayGuard()
+		if cfg.DPoPNonceSecret != "" {
+			dpopNonce = token.NewNonceService(cfg.DPoPNonceSecret, 0)
+		}
 	}
 
 	return &Guard{
@@ -113,6 +123,7 @@ func NewGuard(cfg GuardConfig) *Guard {
 		cache:         cfg.Cache,
 		index:         index,
 		replay:        replay,
+		dpopNonce:     dpopNonce,
 		enableDPoP:    cfg.EnableDPoP,
 		fapiProfile:   cfg.FAPIProfile,
 		webhookSecret: cfg.WebhookSecret,
@@ -174,6 +185,14 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dpopProof = p
+
+		// RFC 9449 §8: require a valid server-issued nonce when configured.
+		if g.dpopNonce != nil {
+			if p.Nonce == "" || g.dpopNonce.Validate(p.Nonce) != nil {
+				g.issueDPoPNonceChallenge(w)
+				return
+			}
+		}
 	}
 
 	// 4. Introspect token (cache-first when a cache is configured)
@@ -378,6 +397,14 @@ func (g *Guard) handleDenial(ctx context.Context, w http.ResponseWriter, r *http
 	}
 
 	challenge.WriteChallenge(w)
+}
+
+// issueDPoPNonceChallenge responds per RFC 9449 §8: 401 with a fresh DPoP-Nonce
+// header and error=use_dpop_nonce, prompting the client to retry with the nonce.
+func (g *Guard) issueDPoPNonceChallenge(w http.ResponseWriter) {
+	w.Header().Set("DPoP-Nonce", g.dpopNonce.Issue())
+	w.Header().Set("WWW-Authenticate", `DPoP error="use_dpop_nonce", error_description="resource server requires nonce in DPoP proof"`)
+	http.Error(w, `{"error":"use_dpop_nonce"}`, http.StatusUnauthorized)
 }
 
 // clientIP extracts the client IP from the request for rate-limit keying,

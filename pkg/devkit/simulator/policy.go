@@ -21,10 +21,10 @@ type Request struct {
 
 // Result is the simulation outcome.
 type Result struct {
-	Allowed       bool
-	PolicyName    string
-	Reason        string
-	RequiredACR   string
+	Allowed        bool
+	PolicyName     string
+	Reason         string
+	RequiredACR    string
 	RequiredMaxAge int
 }
 
@@ -54,9 +54,9 @@ func (s *Simulator) Simulate(req Request) (*Result, error) {
 	}
 
 	out := &Result{
-		Allowed: result.Allowed,
-		Reason:  result.Reason,
-		RequiredACR: result.RequiredACR,
+		Allowed:        result.Allowed,
+		Reason:         result.Reason,
+		RequiredACR:    result.RequiredACR,
 		RequiredMaxAge: result.RequiredMaxAge,
 	}
 	if result.MatchedPolicy != nil {
