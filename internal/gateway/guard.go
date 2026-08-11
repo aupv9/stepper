@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"time"
 
@@ -35,7 +36,8 @@ type Guard struct {
 	fapiProfile   bool // enforce FAPI 2.0 profile on every request
 	webhookSecret string
 	cookieSecret  string
-	defaultTenant string // opt-in fallback tenant when resolution fails; "" = fail closed
+	defaultTenant string      // opt-in fallback tenant when resolution fails; "" = fail closed
+	limiter       RateLimiter // optional per-client-IP rate limiter
 }
 
 // GuardConfig holds Guard dependencies.
@@ -75,6 +77,10 @@ type GuardConfig struct {
 	// unresolvable tenant context is rejected rather than silently mapped to a
 	// default, preserving per-tenant isolation for untrusted clients.
 	DefaultTenant string
+
+	// RateLimiter, when set, rejects requests exceeding the limit (per client
+	// IP) with 429 before introspection, protecting the AS and upstream.
+	RateLimiter RateLimiter
 }
 
 // NewGuard creates a ResourceServerGuard.
@@ -112,6 +118,7 @@ func NewGuard(cfg GuardConfig) *Guard {
 		webhookSecret: cfg.WebhookSecret,
 		cookieSecret:  cfg.CookieSecret,
 		defaultTenant: cfg.DefaultTenant,
+		limiter:       cfg.RateLimiter,
 	}
 }
 
@@ -120,6 +127,13 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, span := telemetry.StartSpan(r.Context(), "gateway.Guard.ServeHTTP")
 	defer span.End()
 	r = r.WithContext(ctx)
+
+	// 0. Rate limit per client IP before doing any work (protects introspection).
+	if g.limiter != nil && !g.limiter.Allow(clientIP(r)) {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, `{"error":"rate_limited"}`, http.StatusTooManyRequests)
+		return
+	}
 
 	// 1. Resolve tenant. Fail closed unless an explicit DefaultTenant is set:
 	// silently mapping unresolvable requests to a default tenant would let a
@@ -364,6 +378,18 @@ func (g *Guard) handleDenial(ctx context.Context, w http.ResponseWriter, r *http
 	}
 
 	challenge.WriteChallenge(w)
+}
+
+// clientIP extracts the client IP from the request for rate-limit keying,
+// preferring the direct connection address (RemoteAddr) so it can't be spoofed
+// via headers. Deployments behind a trusted proxy should terminate rate
+// limiting at the edge or set RemoteAddr from a trusted X-Forwarded-For.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // sanitizeTrustHeaders removes client-supplied tenant/identity headers and sets

@@ -143,6 +143,32 @@ func TestGuard_TenantResolveFailClosed(t *testing.T) {
 	}
 }
 
+func TestGuard_RateLimited(t *testing.T) {
+	_, provider := setupAS(t)
+
+	// rate=0-ish tiny burst: 1 request allowed, subsequent denied with 429.
+	_, srv := buildGuard(t, provider, gateway.GuardConfig{
+		RateLimiter: gateway.NewTokenBucketLimiter(0.0001, 1),
+	})
+
+	// First request (no token) consumes the single burst token → not 429.
+	resp1, err := http.Get(srv.URL + "/resource")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp1.StatusCode == http.StatusTooManyRequests {
+		t.Fatal("first request should not be rate limited")
+	}
+	// Second request from the same client IP → 429.
+	resp2, err := http.Get(srv.URL + "/resource")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp2.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("second request should be 429, got %d", resp2.StatusCode)
+	}
+}
+
 func TestGuard_FAPIProfile_RejectsNonFAPIToken(t *testing.T) {
 	as, provider := setupAS(t)
 

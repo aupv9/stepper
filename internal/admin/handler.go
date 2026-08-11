@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -55,11 +56,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mux.ServeHTTP(w, r)
 }
 
-// checkBearer validates that the request carries the expected admin bearer token.
+// checkBearer validates that the request carries the expected admin bearer token,
+// using a constant-time comparison to avoid leaking the token via timing.
 func (h *Handler) checkBearer(r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	token, ok := strings.CutPrefix(auth, "Bearer ")
-	return ok && token == h.adminToken
+	if !ok {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(h.adminToken)) == 1
 }
 
 func (h *Handler) routes() {

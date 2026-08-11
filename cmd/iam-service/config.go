@@ -20,6 +20,8 @@ type Config struct {
 	WebhookSecret    string // empty = unauthenticated revocation webhook (dev)
 	AdminToken       string // empty = unauthenticated /admin (dev)
 	EnableDPoP       bool
+	RateLimitPerSec  float64 // 0 = disabled
+	RateBurst        int
 }
 
 // LoadConfig reads configuration from IAM_* environment variables, applying
@@ -38,6 +40,8 @@ func LoadConfig() Config {
 		WebhookSecret:    env("IAM_WEBHOOK_SECRET", ""),
 		AdminToken:       env("IAM_ADMIN_TOKEN", ""),
 		EnableDPoP:       envBool("IAM_ENABLE_DPOP", false),
+		RateLimitPerSec:  envFloat("IAM_RATE_LIMIT", 0),
+		RateBurst:        envInt("IAM_RATE_BURST", 20),
 	}
 }
 
@@ -64,4 +68,28 @@ func envBool(key string, def bool) bool {
 		return def
 	}
 	return b
+}
+
+func envFloat(key string, def float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return def
+	}
+	return f
+}
+
+func envInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }

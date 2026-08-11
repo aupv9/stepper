@@ -55,6 +55,10 @@ type IntrospectorConfig struct {
 
 	// Timeout for introspection requests.
 	Timeout time.Duration
+
+	// TokenTypeHint, when set, is sent as the RFC 7662 §2.1 token_type_hint
+	// parameter (e.g. "access_token") to help the AS locate the token faster.
+	TokenTypeHint string
 }
 
 // Introspector performs RFC 7662 token introspection against an AS endpoint.
@@ -80,6 +84,9 @@ func (i *Introspector) Introspect(ctx context.Context, token string) (*CommonCla
 
 	form := url.Values{}
 	form.Set("token", token)
+	if i.cfg.TokenTypeHint != "" {
+		form.Set("token_type_hint", i.cfg.TokenTypeHint)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, i.cfg.Endpoint,
 		strings.NewReader(form.Encode()))

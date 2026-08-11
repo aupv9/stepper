@@ -105,7 +105,12 @@ func run(cfg Config, logger *slog.Logger) error {
 		return err
 	}
 
-	// 6. Guard.
+	// 6. Guard (optional per-IP rate limiter).
+	var limiter gateway.RateLimiter
+	if cfg.RateLimitPerSec > 0 {
+		limiter = gateway.NewTokenBucketLimiter(cfg.RateLimitPerSec, cfg.RateBurst)
+		logger.Info("rate limiting enabled", "per_sec", cfg.RateLimitPerSec, "burst", cfg.RateBurst)
+	}
 	guard := gateway.NewGuard(gateway.GuardConfig{
 		Registry:      registry,
 		Resolver:      resolver,
@@ -121,6 +126,7 @@ func run(cfg Config, logger *slog.Logger) error {
 		// Single-tenant standalone: fall back to "default" when no tenant header
 		// is present. Multi-tenant deployments should leave this empty (fail closed).
 		DefaultTenant: "default",
+		RateLimiter:   limiter,
 	})
 
 	// 7. Admin API + router + server.
