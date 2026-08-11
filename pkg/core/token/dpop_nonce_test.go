@@ -1,6 +1,7 @@
 package token
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 )
@@ -16,13 +17,12 @@ func TestNonceService_IssueValidate(t *testing.T) {
 func TestNonceService_RejectsTampered(t *testing.T) {
 	ns := NewNonceService("secret", time.Minute)
 	nonce := ns.Issue()
-	// Flip the last character (part of the HMAC). The leading timestamp bytes are
-	// zero, so tampering the front can be a no-op; the tail is always signature.
-	repl := byte('A')
-	if nonce[len(nonce)-1] == 'A' {
-		repl = 'B'
-	}
-	bad := nonce[:len(nonce)-1] + string(repl)
+	// Decode, flip a byte inside the HMAC region (bytes 8..), re-encode. Editing
+	// base64 characters directly can be a no-op on padding bits, so mutate the
+	// raw bytes to guarantee a real change.
+	raw, _ := base64.RawURLEncoding.DecodeString(nonce)
+	raw[20] ^= 0xFF
+	bad := base64.RawURLEncoding.EncodeToString(raw)
 	if err := ns.Validate(bad); err == nil {
 		t.Fatal("tampered nonce must be rejected")
 	}

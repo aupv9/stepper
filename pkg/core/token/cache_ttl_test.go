@@ -11,7 +11,7 @@ import (
 
 // introspectServer returns an httptest server that always responds with the
 // given introspection JSON body.
-func introspectServer(t *testing.T, body IntrospectionResponse) *httptest.Server {
+func introspectServer(t testing.TB, body IntrospectionResponse) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
