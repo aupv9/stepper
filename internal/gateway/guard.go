@@ -233,9 +233,24 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 7. Policy passed for the effective path. If this was a replay, rewrite the
-	// request to the saved resource now (safe: policy above already covered it).
+	// 7. Policy passed for the effective path. If this was a replay, drive the
+	// step-up state machine Challenge → Completed (enforcing the flow timeout)
+	// before rewriting the request to the saved resource. A flow that has aged
+	// past the state machine's timeout is failed and re-challenged.
 	if saved != nil {
+		flow := &stepup.FlowState{
+			State:        stepup.StateChallenge,
+			SavedRequest: saved,
+			StartedAt:    saved.SavedAt,
+		}
+		if completeErr := g.sm.Complete(flow); completeErr != nil {
+			g.sm.Fail(flow)
+			if g.cookieSecret != "" {
+				stepup.ClearStateCookie(w)
+			}
+			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "step-up flow expired: "+completeErr.Error(), "", 0)
+			return
+		}
 		r = r.Clone(r.Context())
 		r.Method = effMethod
 		r.URL.Path = effPath

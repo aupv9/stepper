@@ -86,13 +86,14 @@ func newE2EEnv(t *testing.T, pCfg *policy.Config, adminToken, cookieSecret strin
 	})
 
 	guard := gateway.NewGuard(gateway.GuardConfig{
-		Registry:     reg,
-		Resolver:     tenant.NewChainResolver(tenant.NewHeaderResolver("X-Tenant-ID")),
-		PolicyEngine: eng,
-		Realm:        "Test",
-		Cache:        cache,
-		Upstream:     upstream,
-		CookieSecret: cookieSecret,
+		Registry:      reg,
+		Resolver:      tenant.NewChainResolver(tenant.NewHeaderResolver("X-Tenant-ID")),
+		PolicyEngine:  eng,
+		Realm:         "Test",
+		Cache:         cache,
+		Upstream:      upstream,
+		CookieSecret:  cookieSecret,
+		DefaultTenant: "default",
 	})
 
 	adminHandler := admin.New(admin.Config{
