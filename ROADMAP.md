@@ -46,16 +46,17 @@ Trước đây không có `cmd/`, gateway mode trong README/CLAUDE.md không bui
 
 ---
 
-## 🟡 Milestone 3 — Hardening & đóng gap RFC còn lại
+## ✅ Milestone 3 — Hardening & đóng gap RFC (gần xong)
 
-- [ ] **Audience/issuer enforcement** — thêm `aud` vào `IntrospectionResponse`; truyền `jwt.WithIssuer`/`WithAudience`/`WithValidMethods` vào JWT validator.
-- [ ] **Cross-tenant binding** — assert `claims.Issuer == provider.Issuer()` sau introspection; document `HeaderResolver` chỉ dùng sau trusted edge.
-- [ ] **Cache TTL clamp** — `min(configuredTTL, time.Until(exp))`, không cache khi `ttl <= 0` (cả `guard.go` lẫn `CachedIntrospector`).
-- [ ] **Proxy header hygiene** — strip `X-Tenant-ID` client gửi, re-inject `X-Iam-*` từ context đã verify.
-- [ ] **Wire FAPI 2.0** — `CommonClaims` implement interface FAPI; gọi `fapi.ValidateRequest` từ guard sau introspection, gate bằng config.
-- [ ] **CSRF StateID** — set `saved.StateID` trong `BeginChallenge`, propagate làm OAuth `state`, verify khi quay lại.
-- [ ] **Tenant resolve fail-closed** — bỏ fallback `"default"` ngầm; chỉ opt-in cho single-tenant.
-- [ ] **DPoP nonce** — server-issued nonce (RFC 9449 §8).
+- [x] **Audience/issuer/alg enforcement** (M3.2) — `aud` trong `IntrospectionResponse` (`Audience` unmarshal string/array); `JWTValidator` truyền `WithValidMethods` (asymmetric-only, chặn HMAC alg-confusion + none) + `WithIssuer`/`WithAudience` tùy chọn.
+- [x] **Cross-tenant binding** (M3.2) — guard reject khi `claims.Issuer != provider.Issuer()`.
+- [x] **Cache TTL clamp** (M3.1) — không cache khi `ttl <= 0`; clamp theo remaining lifetime (cả `guard.go` lẫn `CachedIntrospector`).
+- [x] **Proxy header hygiene** (M3.3) — strip `X-Tenant-ID` client gửi, inject `X-Iam-Tenant-Id`/`X-Iam-Subject` đã verify.
+- [x] **Wire FAPI 2.0** (M3.6) — `CommonClaims` implement `fapi.TokenClaims`; guard gọi `fapi.ValidateRequest` gate bằng `FAPIProfile`.
+- [x] **CSRF StateID** (M3.5) — `BeginChallenge` set `saved.StateID`.
+- [x] **Tenant resolve fail-closed** (M3.4) — bỏ fallback ngầm; opt-in `DefaultTenant`.
+- [x] **Wire state machine** (M3.5) — guard gọi `Complete`/`Fail` (hết dead-code).
+- [ ] **DPoP nonce** — server-issued nonce (RFC 9449 §8) — *còn lại, chuyển M4*.
 
 ---
 
@@ -67,6 +68,7 @@ Trước đây không có `cmd/`, gateway mode trong README/CLAUDE.md không bui
 - [ ] Rate limiting ở guard.
 - [ ] Load test + benchmark introspection cache hit path.
 - [ ] `token_type_hint` cho introspection (RFC 7662 SHOULD).
+- [ ] DPoP server-issued nonce (RFC 9449 §8) — chuyển từ M3.
 - [ ] CI: `make lint` + `make test` gate; publish coverage.
 
 ---
@@ -77,7 +79,7 @@ Trước đây không có `cmd/`, gateway mode trong README/CLAUDE.md không bui
 |---|---|---|
 | M1 | Security blockers | ✅ Hoàn tất |
 | M2 | Standalone binaries | ✅ Hoàn tất |
-| M3 | Hardening & RFC gaps | ⬜ Chưa bắt đầu |
+| M3 | Hardening & RFC gaps | ✅ Hoàn tất (trừ DPoP nonce) |
 | M4 | Quality & ops | ⬜ Chưa bắt đầu |
 
 > Library primitives (PKCE, RAR, Token Exchange, providers, middleware, telemetry, devkit) **đã production-ready** và không nằm trong critical path của các milestone trên.
