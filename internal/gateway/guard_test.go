@@ -143,6 +143,30 @@ func TestGuard_TenantResolveFailClosed(t *testing.T) {
 	}
 }
 
+func TestGuard_FAPIProfile_RejectsNonFAPIToken(t *testing.T) {
+	as, provider := setupAS(t)
+
+	// A plain bronze token: not DPoP-bound, no nonce → fails FAPI 2.0 profile.
+	raw, _ := as.IssueToken(tokenfactory.TokenOptions{
+		Subject:   "alice",
+		ACR:       "urn:mace:incommon:iap:bronze",
+		Scopes:    []string{"openid"},
+		ExpiresIn: time.Hour,
+	})
+
+	_, srv := buildGuard(t, provider, gateway.GuardConfig{FAPIProfile: true})
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/resource", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 for non-FAPI token under FAPIProfile, got %d", resp.StatusCode)
+	}
+}
+
 func TestGuard_ValidToken(t *testing.T) {
 	as, provider := setupAS(t)
 

@@ -75,6 +75,13 @@ type CommonClaims struct {
 	// token to a DPoP key (RFC 9449) and must match the presented proof.
 	CNF *Confirmation `json:"cnf,omitempty"`
 
+	// Nonce is the OIDC nonce, surfaced for FAPI 2.0 profile validation.
+	Nonce string `json:"nonce,omitempty"`
+
+	// RequestURI is set when the authorization was initiated via a Pushed
+	// Authorization Request (RFC 9126), used by the FAPI 2.0 profile.
+	RequestURI string `json:"request_uri,omitempty"`
+
 	// Identity
 	Email    string `json:"email"`
 	Username string `json:"preferred_username"`
@@ -122,3 +129,32 @@ func (c *CommonClaims) HasRole(role string) bool {
 	}
 	return false
 }
+
+// --- fapi.TokenClaims implementation (FAPI 2.0 profile) ---
+
+// HasDPoP reports whether the token is DPoP-bound (has a cnf.jkt confirmation).
+func (c *CommonClaims) HasDPoP() bool {
+	return c.CNF != nil && c.CNF.JKT != ""
+}
+
+// HasPARRequestURI reports whether the authorization was initiated via PAR.
+func (c *CommonClaims) HasPARRequestURI() bool {
+	if c.RequestURI != "" {
+		return true
+	}
+	if c.Extra != nil {
+		if _, ok := c.Extra["request_uri"]; ok {
+			return true
+		}
+		if _, ok := c.Extra["par_id"]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// GetAuthAge returns the elapsed time since authentication (0 if auth_time absent).
+func (c *CommonClaims) GetAuthAge() time.Duration { return c.AuthAge() }
+
+// GetNonce returns the nonce claim value.
+func (c *CommonClaims) GetNonce() string { return c.Nonce }

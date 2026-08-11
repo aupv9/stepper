@@ -33,6 +33,10 @@ type IntrospectionResponse struct {
 	// CNF is the RFC 7800 confirmation claim (cnf.jkt for DPoP binding).
 	CNF *Confirmation `json:"cnf,omitempty"`
 
+	// Nonce and RequestURI support FAPI 2.0 profile validation.
+	Nonce      string `json:"nonce,omitempty"`
+	RequestURI string `json:"request_uri,omitempty"`
+
 	// AuthorizationDetails carries RFC 9396 authorization_details when present.
 	AuthorizationDetails []rar.AuthorizationDetail `json:"authorization_details,omitempty"`
 }
@@ -106,15 +110,17 @@ func (i *Introspector) Introspect(ctx context.Context, token string) (*CommonCla
 // introToCommonClaims maps an IntrospectionResponse to CommonClaims.
 func introToCommonClaims(r *IntrospectionResponse) *CommonClaims {
 	c := &CommonClaims{
-		Active:   r.Active,
-		Subject:  r.Sub,
-		Issuer:   r.Iss,
-		ACR:      r.ACR,
-		AMR:      r.AMR,
-		Username: r.Username,
-		JTI:      r.JTI,
-		CNF:      r.CNF,
-		Audience: []string(r.Aud),
+		Active:     r.Active,
+		Subject:    r.Sub,
+		Issuer:     r.Iss,
+		ACR:        r.ACR,
+		AMR:        r.AMR,
+		Username:   r.Username,
+		JTI:        r.JTI,
+		CNF:        r.CNF,
+		Audience:   []string(r.Aud),
+		Nonce:      r.Nonce,
+		RequestURI: r.RequestURI,
 	}
 	if r.Exp > 0 {
 		c.ExpiresAt = time.Unix(r.Exp, 0)

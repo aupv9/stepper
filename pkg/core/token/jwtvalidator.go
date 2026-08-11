@@ -193,14 +193,17 @@ func (v *JWTValidator) fetchJWKS(ctx context.Context) error {
 type jwtRawClaims struct {
 	jwt.RegisteredClaims
 
-	ACR      string   `json:"acr"`
-	AMR      []string `json:"amr"`
-	SID      string   `json:"sid"`
-	AuthTime int64    `json:"auth_time"`
-	Email    string   `json:"email"`
-	Username string   `json:"preferred_username"`
-	Scope    string   `json:"scope"`
-	TenantID string   `json:"tenant_id"`
+	ACR        string        `json:"acr"`
+	AMR        []string      `json:"amr"`
+	SID        string        `json:"sid"`
+	AuthTime   int64         `json:"auth_time"`
+	Email      string        `json:"email"`
+	Username   string        `json:"preferred_username"`
+	Scope      string        `json:"scope"`
+	TenantID   string        `json:"tenant_id"`
+	Nonce      string        `json:"nonce"`
+	RequestURI string        `json:"request_uri"`
+	CNF        *Confirmation `json:"cnf"`
 
 	// Keycloak nested roles
 	RealmAccess struct {
@@ -213,15 +216,18 @@ type jwtRawClaims struct {
 
 func (r *jwtRawClaims) toCommonClaims() *CommonClaims {
 	c := &CommonClaims{
-		Subject:   r.Subject,
-		Issuer:    r.Issuer,
-		ACR:       r.ACR,
-		AMR:       r.AMR,
-		SessionID: r.SID,
-		Email:     r.Email,
-		Username:  r.Username,
-		TenantID:  r.TenantID,
-		Active:    true,
+		Subject:    r.Subject,
+		Issuer:     r.Issuer,
+		ACR:        r.ACR,
+		AMR:        r.AMR,
+		SessionID:  r.SID,
+		Email:      r.Email,
+		Username:   r.Username,
+		TenantID:   r.TenantID,
+		Nonce:      r.Nonce,
+		RequestURI: r.RequestURI,
+		CNF:        r.CNF,
+		Active:     true,
 	}
 
 	if r.ExpiresAt != nil {

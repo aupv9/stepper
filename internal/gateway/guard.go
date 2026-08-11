@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/common-iam/iam/pkg/core/fapi"
 	"github.com/common-iam/iam/pkg/core/policy"
 	"github.com/common-iam/iam/pkg/core/stepup"
 	"github.com/common-iam/iam/pkg/core/token"
@@ -31,6 +32,7 @@ type Guard struct {
 	index         token.TokenIndex  // optional; jti/subject -> cache key, for revocation
 	replay        token.ReplayGuard // DPoP jti replay guard (built when EnableDPoP)
 	enableDPoP    bool
+	fapiProfile   bool // enforce FAPI 2.0 profile on every request
 	webhookSecret string
 	cookieSecret  string
 	defaultTenant string // opt-in fallback tenant when resolution fails; "" = fail closed
@@ -54,6 +56,10 @@ type GuardConfig struct {
 	// EnableDPoP enforces RFC 9449 DPoP proof-of-possession on every request.
 	// When true, requests without a valid DPoP proof header are rejected with 401.
 	EnableDPoP bool
+
+	// FAPIProfile enforces the FAPI 2.0 Security Profile (DPoP-bound, PAR-
+	// initiated, nonce present, 60s auth_time freshness) on every request.
+	FAPIProfile bool
 
 	// WebhookSecret is the HMAC-SHA256 secret used to authenticate revocation webhook
 	// calls on /webhook/revoke. Leave empty to disable signature verification (dev only).
@@ -102,6 +108,7 @@ func NewGuard(cfg GuardConfig) *Guard {
 		index:         index,
 		replay:        replay,
 		enableDPoP:    cfg.EnableDPoP,
+		fapiProfile:   cfg.FAPIProfile,
 		webhookSecret: cfg.WebhookSecret,
 		cookieSecret:  cfg.CookieSecret,
 		defaultTenant: cfg.DefaultTenant,
@@ -185,6 +192,14 @@ func (g *Guard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if bindErr := dpopProof.VerifyBinding(rawToken, claims.CNF); bindErr != nil {
 			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, "DPoP binding failed: "+bindErr.Error(), "", 0)
+			return
+		}
+	}
+
+	// 4b. FAPI 2.0 profile enforcement (DPoP-bound, PAR-initiated, nonce, fresh auth).
+	if g.fapiProfile {
+		if fapiErr := fapi.ValidateRequest(r, claims, fapi.DefaultFAPI2Config()); fapiErr != nil {
+			g.issueChallenge(w, r, stepup.ErrCodeInvalidToken, fapiErr.Error(), "", 0)
 			return
 		}
 	}
