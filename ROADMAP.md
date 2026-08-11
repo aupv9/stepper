@@ -60,16 +60,18 @@ Trước đây không có `cmd/`, gateway mode trong README/CLAUDE.md không bui
 
 ---
 
-## 🟢 Milestone 4 — Chất lượng & vận hành
+## ✅ Milestone 4 — Chất lượng & vận hành (gần xong)
 
-- [ ] Nâng coverage `pkg/core/token` (56% → ≥80%) — trọng tâm dpop/revocation/cache sau khi vá.
-- [ ] Integration test Redis thật cho `goredis` (hiện 0%, chỉ mock).
-- [ ] Authz cho Admin API/UI (hiện chưa có lớp bảo vệ endpoint admin).
-- [ ] Rate limiting ở guard.
-- [ ] Load test + benchmark introspection cache hit path.
-- [ ] `token_type_hint` cho introspection (RFC 7662 SHOULD).
-- [ ] DPoP server-issued nonce (RFC 9449 §8) — chuyển từ M3.
-- [ ] CI: `make lint` + `make test` gate; publish coverage.
+- [x] Nâng coverage `pkg/core/token` (56% → **81%**) — dpop/revocation/cache/RSA/nonce.
+- [x] Integration test Redis cho `goredis` — env-gated (`IAM_TEST_REDIS_ADDR`) + `fakeRedis` unit test.
+- [x] **Authz Admin API** hardening — `checkBearer` dùng `subtle.ConstantTimeCompare` (M4.2).
+- [x] **Rate limiting** ở guard — token-bucket per client IP, 429; env `IAM_RATE_LIMIT`/`IAM_RATE_BURST` (M4.3).
+- [x] Benchmark introspection cache-hit path (~279ns, 2 allocs) + `HashToken`.
+- [x] `token_type_hint` cho introspection (M4.1).
+- [x] DPoP server-issued nonce (RFC 9449 §8) — `NonceService` + guard `use_dpop_nonce` (M4.4).
+- [x] CI: GitHub Actions (build + vet + race test + coverage + gofmt + golangci-lint).
+- [ ] Load test end-to-end (chưa) — cần môi trường tải riêng.
+- [ ] Public-path policy đạt tới khi không token (guard extract token trước policy) — cân nhắc thiết kế.
 
 ---
 
@@ -79,7 +81,7 @@ Trước đây không có `cmd/`, gateway mode trong README/CLAUDE.md không bui
 |---|---|---|
 | M1 | Security blockers | ✅ Hoàn tất |
 | M2 | Standalone binaries | ✅ Hoàn tất |
-| M3 | Hardening & RFC gaps | ✅ Hoàn tất (trừ DPoP nonce) |
-| M4 | Quality & ops | ⬜ Chưa bắt đầu |
+| M3 | Hardening & RFC gaps | ✅ Hoàn tất |
+| M4 | Quality & ops | ✅ Hoàn tất (còn load test) |
 
 > Library primitives (PKCE, RAR, Token Exchange, providers, middleware, telemetry, devkit) **đã production-ready** và không nằm trong critical path của các milestone trên.

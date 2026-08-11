@@ -24,12 +24,12 @@
 | 10 | Policy engine (YAML, ACR hierarchy) | `pkg/core/policy` | — | ~76% | **B** | ✅ `**` glob + max_age đã vá (M1.4/M1.5) |
 | 11 | Token introspection | `pkg/core/token` | RFC 7662 | ~66% | **B** | ✅ `aud`/`cnf`/`nonce` mapped (M3.2/M3.6) |
 | 12 | JWT validation | `pkg/core/token` | — | ~66% | **B** | ✅ iss/aud/alg allowlist (M3.2) |
-| 13 | Token cache (memory/Redis) | `pkg/core/token` + `goredis` | — | ~66% / 0% | **B-** | ✅ TTL clamp (M3.1); Redis chưa có integration test (M4) |
+| 13 | Token cache (memory/Redis) | `pkg/core/token` + `goredis` | — | 81% / env-gated | **B** | ✅ TTL clamp (M3.1) + Redis integration test (M4.6) |
 | 14 | Token revocation webhook | `pkg/core/token` | RFC 7009 | ~66% | **B** | ✅ JTI/subject index đã vá (M1.3) |
-| 15 | DPoP proof-of-possession | `pkg/core/token` | RFC 9449 | ~66% | **B** | ✅ Bind `cnf.jkt` + chống replay (M1.2); còn thiếu nonce (M4) |
+| 15 | DPoP proof-of-possession | `pkg/core/token` | RFC 9449 | 81% | **A-** | ✅ Bind `cnf.jkt` + replay + server nonce §8 (M1.2/M4.4) |
 | 16 | FAPI 2.0 + PAR | `pkg/core/fapi` | RFC 9126 | 90.0% | **B** | ✅ Wired vào guard qua `FAPIProfile` (M3.6) |
 | 17 | Gateway guard + reverse proxy | `internal/gateway` | — | ~82% | **B** | ✅ Bypass/TTL/tenant/headers/issuer đã vá (M1.1/M3.x) |
-| 18 | Admin API + UI | `internal/admin` | — | 68.1% | **B** | ✅ Sẵn sàng (cần authz) |
+| 18 | Admin API + UI | `internal/admin` | — | 68.1% | **B** | ✅ Bearer authz constant-time (M4.2) |
 | 19 | HTTP server (graceful shutdown) | `internal/server` | — | 100% | **A** | ✅ Sẵn sàng |
 | 20 | Standalone binaries (`cmd/`) | `cmd/iam-{service,cli}` | — | config test | **B** | ✅ Đã tạo + wiring env (M2) |
 
@@ -100,6 +100,9 @@ Những feature dưới đây đã pass test, đúng RFC, không có gap chặn 
 - [x] **`cmd/iam-service`** (M2) — entrypoint gateway standalone; dev mode tự khởi động LocalAS + in demo token; graceful shutdown. Smoke-test: bronze token được phép ở tier của nó, bị step-up challenge đúng RFC 9470 khi POST payments.
 - [x] **`cmd/iam-cli`** (M2) — `policy-check`, `token issue`, `introspect`, `version`.
 - [x] **Env-var wiring** (M2) — `cmd/iam-service/config.go` đọc `IAM_ADDR`, `IAM_REALM`, `IAM_POLICY_FILE`, `IAM_UPSTREAM_URL`, `IAM_OIDC_*`, `IAM_LOG_FORMAT`, `IAM_COOKIE_SECRET`, `IAM_WEBHOOK_SECRET`, `IAM_ADMIN_TOKEN`, `IAM_ENABLE_DPOP`.
-- [ ] Redis adapter (`goredis`) coverage 0% — chỉ có mock test, chưa có integration test với Redis thật (**M4**).
-- [ ] DPoP server-issued nonce (RFC 9449 §8) — **M4**.
-- [ ] Public-path policy không thể đạt tới nếu không có token (guard extract token trước policy) — cân nhắc ở **M4**.
+- [x] Redis adapter (`goredis`) — env-gated integration test (`IAM_TEST_REDIS_ADDR`) + `fakeRedis` unit test (M4.6).
+- [x] DPoP server-issued nonce (RFC 9449 §8) — `NonceService` + guard `use_dpop_nonce` (M4.4).
+- [x] Rate limiting — token-bucket per client IP, 429 (M4.3).
+- [x] CI — GitHub Actions: build + vet + race test + coverage + gofmt + golangci-lint (M4.5).
+- [ ] Load test end-to-end — cần môi trường tải riêng.
+- [ ] Public-path policy không thể đạt tới nếu không có token (guard extract token trước policy) — cân nhắc thiết kế.
